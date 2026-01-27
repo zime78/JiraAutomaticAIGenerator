@@ -1,0 +1,36 @@
+# Binaries
+jira-ai-generator
+*.exe
+dist/
+
+# Output directory (contains downloaded attachments)
+output/
+
+# Config files (contain sensitive Jira credentials)
+config.ini
+
+# Go build artifacts
+*.test
+*.out
+*.prof
+coverage.out
+coverage.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Fyne
+fyne-cross/
+
+# Temporary files
+*.tmp
+*.log
+/tmp/

@@ -1,0 +1,20 @@
+[jira]
+url = https://your-domain.atlassian.net
+email = your-email@example.com
+api_key = your-api-token
+
+[output]
+dir = ./output
+
+[ai]
+prompt_template = 다음 Jira 이슈를 분석하고 수정 코드를 작성해주세요:
+
+[claude]
+# Claude Code CLI 경로 (기본값: claude)
+cli_path = claude
+# 작업 디렉토리 (Claude Code가 실행될 기본 디렉토리)
+work_dir = ./
+# AI 분석용 프로젝트 경로 (분석 대상 프로젝트의 절대 경로)
+project_path = /path/to/your/project
+# 분석 요청 활성화
+enabled = true
