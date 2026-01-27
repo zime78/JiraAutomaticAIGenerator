@@ -133,6 +133,19 @@ func (a *App) onStopAnalysis() {
 }
 
 func (a *App) loadJobResult(job *AnalysisJob) {
+	// 이슈 정보 마크다운 로드
+	mdPath := job.MDPath
+	if mdPath == "" {
+		// MDPath가 없으면 AnalysisPath에서 파생
+		mdPath = strings.TrimSuffix(job.AnalysisPath, "_analysis.md") + ".md"
+	}
+	if mdContent, err := os.ReadFile(mdPath); err == nil {
+		a.resultText.SetText(string(mdContent))
+		a.copyBtn.Enable()
+		a.currentMDPath = mdPath
+	}
+
+	// AI 분석 결과 로드
 	content, err := os.ReadFile(job.AnalysisPath)
 	if err != nil {
 		a.analysisText.SetText(fmt.Sprintf("⏳ 분석 진행 중...\n\n이슈: %s\nPID: %d\n\n아직 결과가 생성되지 않았습니다.", job.IssueKey, job.PID))
@@ -266,9 +279,11 @@ func (a *App) loadPreviousAnalysis() {
 			timeStr = modTime.Format("01/02 15:04")
 		}
 
+		mdPath := filepath.Join(outputDir, issueKey, issueKey+".md")
 		job := &AnalysisJob{
 			IssueKey:     issueKey,
 			AnalysisPath: analysisPath,
+			MDPath:       mdPath,
 			StartTime:    timeStr,
 		}
 		a.completedJobs = append(a.completedJobs, job)
