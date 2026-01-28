@@ -26,9 +26,20 @@ func (a *App) onChannelProcess(channelIndex int) {
 
 	ch.ProcessBtn.Disable()
 	ch.CopyResultBtn.Disable()
+	ch.CopyAnalysisBtn.Disable()
+	ch.ExecutePlanBtn.Disable()
 	ch.ProgressBar.Show()
 	ch.ProgressBar.SetValue(0)
 	ch.StatusLabel.SetText("이슈 조회 중...")
+
+	// 이전 결과 초기화
+	ch.ResultText.SetText("")
+	ch.AnalysisText.SetText("")
+	ch.CurrentDoc = nil
+	ch.CurrentMDPath = ""
+	ch.CurrentAnalysisPath = ""
+	ch.CurrentPlanPath = ""
+	ch.CurrentScriptPath = ""
 
 	go a.processIssue(issueKey, channelIndex)
 }
