@@ -43,11 +43,13 @@ type App struct {
 	currentDoc          *domain.GeneratedDocument
 	currentMDPath       string
 	currentAnalysisPath string
+	currentPlanPath     string // Phase 1 결과 plan 파일 경로
 	currentScriptPath   string
 	runningJobs         []*AnalysisJob
 	selectedJobIndex    int
 	queues              [3]*AnalysisQueue
 	completedJobs       []*AnalysisJob
+	executePlanBtn      *widget.Button // "계획 실행" 버튼
 }
 
 // NewApp creates a new application instance with dependency injection

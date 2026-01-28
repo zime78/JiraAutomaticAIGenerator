@@ -65,3 +65,100 @@ func TestFFmpegVideoProcessor_IsAvailable(t *testing.T) {
 	available := processor.IsAvailable()
 	t.Logf("FFmpeg available: %v", available)
 }
+
+func TestBuildAnalysisPlanPrompt(t *testing.T) {
+	prompt := adapter.BuildAnalysisPlanPrompt("ITSM-5090", "/output/ITSM-5090/ITSM-5090.md")
+
+	// plan 파일 생성 금지 지시가 포함되어야 함
+	if !containsStr(prompt, "직접 전체 출력") {
+		t.Error("프롬프트에 '직접 전체 출력' 지시가 포함되어야 합니다")
+	}
+
+	// EnterPlanMode 사용 금지 지시가 포함되어야 함
+	if !containsStr(prompt, "EnterPlanMode") {
+		t.Error("프롬프트에 EnterPlanMode 사용 금지 지시가 포함되어야 합니다")
+	}
+
+	// 구조화된 출력 형식 섹션이 포함되어야 함
+	requiredSections := []string{
+		"ISSUE_SUMMARY",
+		"ROOT_CAUSE",
+		"FILES_TO_MODIFY",
+		"TEST_CHECKLIST",
+		"EXECUTION_CONTEXT",
+	}
+	for _, section := range requiredSections {
+		if !containsStr(prompt, section) {
+			t.Errorf("프롬프트에 '%s' 섹션이 포함되어야 합니다", section)
+		}
+	}
+
+	// 이슈 키와 파일 경로가 포함되어야 함
+	if !containsStr(prompt, "ITSM-5090") {
+		t.Error("프롬프트에 이슈 키가 포함되어야 합니다")
+	}
+	if !containsStr(prompt, "/output/ITSM-5090/ITSM-5090.md") {
+		t.Error("프롬프트에 마크다운 파일 경로가 포함되어야 합니다")
+	}
+
+	// "파일에 작성했습니다" 같은 문구 사용 금지 지시 확인
+	if !containsStr(prompt, "파일에 작성했습니다") {
+		t.Error("프롬프트에 '파일에 작성했습니다' 사용 금지 지시가 포함되어야 합니다")
+	}
+}
+
+func TestBuildAnalysisPlanPrompt_DifferentFromLegacy(t *testing.T) {
+	planPrompt := adapter.BuildAnalysisPlanPrompt("ITSM-1234", "/test/path.md")
+	legacyPrompt := adapter.BuildAnalysisPrompt("ITSM-1234", "/test/path.md")
+
+	// plan 프롬프트와 기존 프롬프트는 다른 내용이어야 함
+	if planPrompt == legacyPrompt {
+		t.Error("plan 프롬프트는 기존 프롬프트와 달라야 합니다")
+	}
+
+	// plan 프롬프트에는 EXECUTION_CONTEXT가 있어야 함 (기존에는 없음)
+	if !containsStr(planPrompt, "EXECUTION_CONTEXT") {
+		t.Error("plan 프롬프트에 EXECUTION_CONTEXT 섹션이 있어야 합니다")
+	}
+}
+
+func TestAnalyzeAndGeneratePlan_Disabled(t *testing.T) {
+	// Claude 비활성 상태에서 호출 시 에러 반환
+	claude := adapter.NewClaudeCodeAdapter("claude", "/tmp", false)
+	_, err := claude.AnalyzeAndGeneratePlan("/test/test.md", "test prompt")
+	if err == nil {
+		t.Error("비활성 상태에서 에러가 반환되어야 합니다")
+	}
+}
+
+func TestExecutePlan_Disabled(t *testing.T) {
+	// Claude 비활성 상태에서 호출 시 에러 반환
+	claude := adapter.NewClaudeCodeAdapter("claude", "/tmp", false)
+	_, err := claude.ExecutePlan("/test/plan.md")
+	if err == nil {
+		t.Error("비활성 상태에서 에러가 반환되어야 합니다")
+	}
+}
+
+func TestExecutePlan_FileNotFound(t *testing.T) {
+	// 존재하지 않는 plan 파일 호출 시 에러 반환
+	claude := adapter.NewClaudeCodeAdapter("claude", "/tmp", true)
+	_, err := claude.ExecutePlan("/nonexistent/plan.md")
+	if err == nil {
+		t.Error("존재하지 않는 파일에 대해 에러가 반환되어야 합니다")
+	}
+}
+
+// containsStr은 문자열 포함 여부를 확인하는 헬퍼 함수
+func containsStr(s, substr string) bool {
+	return len(s) > 0 && len(substr) > 0 && contains(s, substr)
+}
+
+func contains(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}

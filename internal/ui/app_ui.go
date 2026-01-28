@@ -43,6 +43,13 @@ func (a *App) createMainContent() fyne.CanvasObject {
 	a.copyBtn = widget.NewButtonWithIcon("결과 복사", theme.ContentCopyIcon(), a.onCopy)
 	a.copyBtn.Disable()
 
+	a.executePlanBtn = widget.NewButtonWithIcon("계획 실행", theme.MailForwardIcon(), a.onExecutePlan)
+	a.executePlanBtn.Importance = widget.WarningImportance
+	a.executePlanBtn.Disable()
+	if !a.claudeAdapter.IsEnabled() {
+		a.executePlanBtn.Hide()
+	}
+
 	a.stopAnalysisBtn = widget.NewButtonWithIcon("전체 중지", theme.MediaStopIcon(), a.onStopAllQueues)
 	a.stopAnalysisBtn.Importance = widget.DangerImportance
 	if !a.claudeAdapter.IsEnabled() {
@@ -52,6 +59,7 @@ func (a *App) createMainContent() fyne.CanvasObject {
 	buttonRow := container.NewHBox(
 		a.processBtn,
 		a.copyBtn,
+		a.executePlanBtn,
 		a.stopAnalysisBtn,
 	)
 

@@ -8,11 +8,27 @@ import (
 	"strings"
 )
 
+// AnalysisPhase는 분석 실행 단계를 나타냄
+type AnalysisPhase int
+
+const (
+	PhaseAnalyze AnalysisPhase = iota // Phase 1: 읽기 전용 분석 → _plan.md 생성
+	PhaseExecute                      // Phase 2: 계획 실행 → _execution.md 생성
+)
+
 // AnalysisResult contains the result of starting an analysis
 type AnalysisResult struct {
 	OutputPath string
 	ScriptPath string
 	PID        int
+}
+
+// PlanResult는 Phase 1 (분석 및 계획 생성) 결과를 담는 구조체
+type PlanResult struct {
+	PlanPath   string // _plan.md 파일 경로
+	ScriptPath string // 실행 스크립트 경로
+	LogPath    string // 로그 파일 경로
+	PID        int    // 백그라운드 프로세스 ID
 }
 
 // ClaudeCodeAdapter implements Claude Code CLI integration
@@ -226,6 +242,328 @@ func BuildAnalysisPrompt(issueKey, mdPath string) string {
 - 요약만 하지 말고, **복사해서 바로 적용할 수 있는 구체적인 수정 코드**를 반드시 포함하세요.
 - "계획 파일에 작성했습니다" 같은 문구 없이 모든 내용을 여기에 출력하세요.`,
 		issueKey, mdPath)
+}
+
+// BuildAnalysisPlanPrompt는 Phase 1용 프롬프트를 생성한다.
+// 기존 BuildAnalysisPrompt와 달리 모든 분석 결과를 인라인으로 출력하도록 강제하고,
+// Phase 2에서 바로 실행 가능한 구조화된 형식으로 출력을 요구한다.
+func BuildAnalysisPlanPrompt(issueKey, mdPath string) string {
+	return fmt.Sprintf(`Jira 이슈 %s를 분석하고 수정 계획을 작성해주세요.
+
+분석 대상 파일: %s
+
+## 절대 규칙
+- 모든 분석 결과를 이 응답에 **직접 전체 출력**하세요.
+- 별도의 플랜 파일이나 외부 파일을 절대 생성하지 마세요.
+- "파일에 작성했습니다", "계획을 만들었습니다" 같은 문구를 사용하지 마세요.
+- EnterPlanMode 도구를 사용하지 마세요.
+- TodoWrite 도구를 사용하지 마세요.
+- 요약이 아닌 **전체 상세 분석**을 출력하세요.
+
+## 분석 절차
+1. 분석 대상 파일을 읽어 이슈 내용과 첨부 이미지를 파악하세요.
+2. 코드베이스를 검색하여 관련 파일을 찾으세요.
+3. 근본 원인을 파악하세요.
+4. 구체적인 수정 코드를 제시하세요.
+
+## 출력 형식 (반드시 이 구조를 정확히 따르세요)
+
+### ISSUE_SUMMARY
+(이슈 요약 1-2줄)
+
+### ROOT_CAUSE
+(관련 파일의 **절대 경로**와 문제가 되는 코드 라인 번호를 명시하여 원인 분석)
+
+### FILES_TO_MODIFY
+(수정이 필요한 각 파일에 대해 아래 형식으로 작성)
+
+#### 파일: [절대 파일 경로]
+- 수정 이유: [왜 수정이 필요한지]
+
+수정 전:
+` + "```" + `kotlin (또는 해당 언어)
+// 기존 코드
+` + "```" + `
+
+수정 후:
+` + "```" + `kotlin
+// 변경된 코드
+` + "```" + `
+
+### TEST_CHECKLIST
+- [ ] 체크 항목 1
+- [ ] 체크 항목 2
+
+### EXECUTION_CONTEXT
+(이 수정을 실행할 때 Claude Code가 알아야 할 추가 컨텍스트: 관련 클래스 관계, 의존성, 주의사항 등)
+
+## 중요 규칙
+- **별도의 파일을 생성하지 마세요**. 모든 내용을 이 응답에 직접 출력하세요.
+- 복사해서 바로 적용할 수 있는 **구체적인 수정 코드**를 반드시 포함하세요.
+- "계획 파일에 작성했습니다" 같은 문구 없이 모든 내용을 여기에 출력하세요.`,
+		issueKey, mdPath)
+}
+
+// AnalyzeAndGeneratePlan은 Phase 1: 읽기 전용 분석을 실행하고 _plan.md를 생성한다.
+// 기존 AnalyzeIssue와 유사하지만, 결과를 Jira 컨텍스트 + 분석 결과 + 실행 지시사항으로
+// 구조화된 plan 파일로 조립한다.
+func (c *ClaudeCodeAdapter) AnalyzeAndGeneratePlan(mdFilePath, prompt string) (*PlanResult, error) {
+	if !c.enabled {
+		return nil, fmt.Errorf("Claude integration is not enabled")
+	}
+
+	fmt.Printf("[Claude] Phase 1: 분석 및 계획 생성 시작...\n")
+	fmt.Printf("[Claude] CLI Path: %s\n", c.cliPath)
+	fmt.Printf("[Claude] Work Dir: %s\n", c.workDir)
+	fmt.Printf("[Claude] MD File: %s\n", mdFilePath)
+
+	// 마크다운 파일 읽기
+	mdContent, err := os.ReadFile(mdFilePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read MD file: %w", err)
+	}
+
+	// 파일 경로 설정
+	basePath := strings.TrimSuffix(mdFilePath, ".md")
+	planPath := basePath + "_plan.md"
+	promptFile := basePath + "_plan_prompt.txt"
+	scriptPath := basePath + "_plan_run.sh"
+	logFile := basePath + "_plan_log.txt"
+
+	// 프롬프트 파일 작성
+	fullPrompt := fmt.Sprintf("%s\n\n---\n%s", prompt, string(mdContent))
+	if err := os.WriteFile(promptFile, []byte(fullPrompt), 0644); err != nil {
+		return nil, fmt.Errorf("failed to write prompt file: %w", err)
+	}
+
+	// 래퍼 스크립트 생성: Claude 실행 → 결과를 plan 파일로 조립
+	scriptContent := fmt.Sprintf(`#!/bin/bash
+exec > "%s" 2>&1
+echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Phase 1: 분석 및 계획 생성 시작..."
+echo "Working directory: %s"
+cd "%s"
+echo "Prompt file: %s"
+echo "Plan file: %s"
+echo ""
+echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Running Claude (Phase 1 - 분석)..."
+%s --print "$(cat '%s')" --output-format text > /tmp/claude_plan_$$.txt 2>&1
+CLAUDE_EXIT=$?
+echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Claude exited with code: $CLAUDE_EXIT"
+echo "Output size: $(wc -c < /tmp/claude_plan_$$.txt) bytes"
+echo ""
+echo "=== Claude Output ==="
+cat /tmp/claude_plan_$$.txt
+echo "=== End Output ==="
+echo ""
+echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Building plan file..."
+
+# plan 파일 헤더 작성
+cat > "%s" << 'PLAN_HEADER'
+# Claude Code 실행 계획
+
+> 이 파일은 Claude Code에 직접 전달하여 자동 수정을 실행할 수 있는 구조화된 계획입니다.
+> 아래 "실행 지시사항" 섹션의 지침에 따라 코드를 수정하세요.
+
+PLAN_HEADER
+
+# Jira 이슈 컨텍스트 추가
+echo "## Jira 이슈 컨텍스트" >> "%s"
+echo "" >> "%s"
+cat "%s" >> "%s"
+echo "" >> "%s"
+echo "---" >> "%s"
+echo "" >> "%s"
+
+# AI 분석 결과 추가
+echo "## AI 분석 결과" >> "%s"
+echo "" >> "%s"
+echo "생성 시간: $(date '+%%Y-%%m-%%d %%H:%%M:%%S')" >> "%s"
+echo "프로젝트: %s" >> "%s"
+echo "" >> "%s"
+if [ $CLAUDE_EXIT -ne 0 ]; then
+    echo "⚠️ Claude 분석 중 오류 발생 (exit code: $CLAUDE_EXIT)" >> "%s"
+    echo "" >> "%s"
+fi
+cat /tmp/claude_plan_$$.txt >> "%s"
+echo "" >> "%s"
+echo "---" >> "%s"
+echo "" >> "%s"
+
+# 실행 지시사항 추가
+cat >> "%s" << 'EXEC_SECTION'
+
+## 실행 지시사항
+
+위 분석 결과를 바탕으로 다음을 수행하세요:
+
+1. **파일 수정**: 위 "FILES_TO_MODIFY" 섹션에서 식별된 파일을 열고, 제시된 수정 코드를 적용하세요.
+2. **빌드 확인**: 수정 후 빌드가 성공하는지 확인하세요.
+3. **테스트 실행**: 관련 테스트가 있다면 실행하세요.
+4. **변경 요약**: 수행한 모든 변경사항을 요약하세요.
+
+### 중요 규칙
+- 분석 결과에서 명시한 파일과 코드만 수정하세요.
+- 불필요한 리팩토링은 하지 마세요.
+- 수정할 수 없는 항목은 이유를 설명하세요.
+
+EXEC_SECTION
+
+echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Plan file created: %s"
+rm -f /tmp/claude_plan_$$.txt "%s"
+echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Phase 1 완료!"
+`,
+		logFile, c.workDir, c.workDir, promptFile, planPath,
+		c.cliPath, promptFile,
+		planPath,
+		planPath, planPath, mdFilePath, planPath, planPath, planPath, planPath,
+		planPath, planPath, planPath, c.workDir, planPath, planPath,
+		planPath, planPath, planPath, planPath, planPath,
+		planPath,
+		planPath, planPath,
+		promptFile)
+
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
+		return nil, fmt.Errorf("failed to write script: %w", err)
+	}
+
+	// 백그라운드 프로세스로 실행
+	cmd := exec.Command("nohup", "bash", scriptPath)
+	cmd.Dir = c.workDir
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start background process: %w", err)
+	}
+
+	go func() {
+		cmd.Wait()
+	}()
+
+	fmt.Printf("[Claude] Phase 1 시작됨 (PID: %d)\n", cmd.Process.Pid)
+	fmt.Printf("[Claude] Plan 파일: %s\n", planPath)
+	fmt.Printf("[Claude] 로그 파일: %s\n", logFile)
+
+	return &PlanResult{
+		PlanPath:   planPath,
+		ScriptPath: scriptPath,
+		LogPath:    logFile,
+		PID:        cmd.Process.Pid,
+	}, nil
+}
+
+// ExecutePlan은 Phase 2: plan 파일을 Claude Code에 전달하여 실제 코드 수정을 실행한다.
+func (c *ClaudeCodeAdapter) ExecutePlan(planPath string) (*AnalysisResult, error) {
+	if !c.enabled {
+		return nil, fmt.Errorf("Claude integration is not enabled")
+	}
+
+	fmt.Printf("[Claude] Phase 2: 계획 실행 시작...\n")
+	fmt.Printf("[Claude] Plan File: %s\n", planPath)
+
+	// plan 파일 읽기
+	planContent, err := os.ReadFile(planPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read plan file: %w", err)
+	}
+
+	// 파일 경로 설정
+	basePath := strings.TrimSuffix(planPath, "_plan.md")
+	executionPath := basePath + "_execution.md"
+	promptFile := basePath + "_exec_prompt.txt"
+	scriptPath := basePath + "_exec_run.sh"
+	logFile := basePath + "_exec_log.txt"
+
+	// 프롬프트 파일 작성
+	if err := os.WriteFile(promptFile, planContent, 0644); err != nil {
+		return nil, fmt.Errorf("failed to write prompt file: %w", err)
+	}
+
+	// 래퍼 스크립트 생성
+	scriptContent := fmt.Sprintf(`#!/bin/bash
+exec > "%s" 2>&1
+echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Phase 2: 계획 실행 시작..."
+echo "Working directory: %s"
+cd "%s"
+echo "Prompt file: %s"
+echo "Output file: %s"
+echo ""
+echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Running Claude (Phase 2 - 실행)..."
+%s --print "$(cat '%s')" --output-format text > /tmp/claude_exec_$$.txt 2>&1
+CLAUDE_EXIT=$?
+echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Claude exited with code: $CLAUDE_EXIT"
+echo "Output size: $(wc -c < /tmp/claude_exec_$$.txt) bytes"
+echo ""
+echo "=== Claude Output ==="
+cat /tmp/claude_exec_$$.txt
+echo "=== End Output ==="
+echo ""
+echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Writing execution result..."
+
+echo "# 실행 결과" > "%s"
+echo "" >> "%s"
+echo "📅 생성 시간: $(date '+%%Y-%%m-%%d %%H:%%M:%%S')" >> "%s"
+echo "📁 프로젝트: %s" >> "%s"
+echo "" >> "%s"
+echo "---" >> "%s"
+echo "" >> "%s"
+if [ $CLAUDE_EXIT -ne 0 ]; then
+    echo "❌ Claude 오류 발생 (exit code: $CLAUDE_EXIT)" >> "%s"
+    echo "" >> "%s"
+fi
+cat /tmp/claude_exec_$$.txt >> "%s"
+echo "" >> "%s"
+echo "---" >> "%s"
+echo "" >> "%s"
+echo "✅ 실행 완료: $(date '+%%Y-%%m-%%d %%H:%%M:%%S')" >> "%s"
+
+rm -f /tmp/claude_exec_$$.txt "%s" "%s"
+echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Phase 2 완료!"
+`,
+		logFile, c.workDir, c.workDir, promptFile, executionPath,
+		c.cliPath, promptFile,
+		executionPath, executionPath, executionPath, c.workDir, executionPath,
+		executionPath, executionPath, executionPath,
+		executionPath, executionPath,
+		executionPath, executionPath, executionPath, executionPath, executionPath,
+		promptFile, scriptPath)
+
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
+		return nil, fmt.Errorf("failed to write script: %w", err)
+	}
+
+	// 백그라운드 프로세스로 실행
+	cmd := exec.Command("nohup", "bash", scriptPath)
+	cmd.Dir = c.workDir
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start background process: %w", err)
+	}
+
+	go func() {
+		cmd.Wait()
+	}()
+
+	fmt.Printf("[Claude] Phase 2 시작됨 (PID: %d)\n", cmd.Process.Pid)
+	fmt.Printf("[Claude] 실행 결과: %s\n", executionPath)
+
+	return &AnalysisResult{
+		OutputPath: executionPath,
+		ScriptPath: scriptPath,
+		PID:        cmd.Process.Pid,
+	}, nil
+}
+
+// SendPlanToClaudeAsync는 Phase 1 분석을 비동기적으로 실행한다.
+func (c *ClaudeCodeAdapter) SendPlanToClaudeAsync(mdFilePath, prompt string, onComplete func(*PlanResult, error)) {
+	go func() {
+		result, err := c.AnalyzeAndGeneratePlan(mdFilePath, prompt)
+		if onComplete != nil {
+			onComplete(result, err)
+		}
+	}()
 }
 
 // ExtractAnalysisFromMD extracts the key content from generated markdown
