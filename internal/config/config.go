@@ -36,7 +36,6 @@ type AIConfig struct {
 // ClaudeConfig holds Claude Code CLI settings
 type ClaudeConfig struct {
 	CLIPath      string
-	WorkDir      string
 	ChannelPaths [3]string // 채널별 프로젝트 경로
 	Enabled      bool
 }
@@ -67,7 +66,6 @@ func Load(path string) (*Config, error) {
 	// Claude section
 	claudeSection := cfg.Section("claude")
 	config.Claude.CLIPath = claudeSection.Key("cli_path").MustString("claude")
-	config.Claude.WorkDir = claudeSection.Key("work_dir").MustString("./")
 	config.Claude.ChannelPaths = [3]string{
 		claudeSection.Key("project_path_1").MustString(""),
 		claudeSection.Key("project_path_2").MustString(""),

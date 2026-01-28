@@ -12,9 +12,7 @@ prompt_template = 다음 Jira 이슈를 분석하고 수정 코드를 작성해�
 [claude]
 # Claude Code CLI 경로 (기본값: claude)
 cli_path = claude
-# 작업 디렉토리 (Claude Code가 실행될 기본 디렉토리)
-work_dir = ./
-# 채널별 프로젝트 경로 (각 채널이 분석할 프로젝트의 절대 경로)
+# 채널별 프로젝트 경로 (각 채널이 분석할 프로젝트의 절대 경로, 필수)
 project_path_1 = /path/to/your/project1
 project_path_2 = /path/to/your/project2
 project_path_3 = /path/to/your/project3

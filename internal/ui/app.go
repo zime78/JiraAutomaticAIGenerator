@@ -47,7 +47,7 @@ func NewApp(cfg *config.Config) *App {
 	// Create adapters
 	jiraClient := adapter.NewJiraClient(cfg.Jira.URL, cfg.Jira.Email, cfg.Jira.APIKey)
 	docGenerator := adapter.NewMarkdownGenerator(cfg.AI.PromptTemplate)
-	claudeAdapter := adapter.NewClaudeCodeAdapter(cfg.Claude.CLIPath, cfg.Claude.WorkDir, cfg.Claude.Enabled)
+	claudeAdapter := adapter.NewClaudeCodeAdapter(cfg.Claude.CLIPath, cfg.Claude.Enabled)
 	videoProcessor := adapter.NewFFmpegVideoProcessor()
 	downloader := adapter.NewAttachmentDownloader(jiraClient, cfg.Output.Dir)
 

@@ -34,19 +34,13 @@ type PlanResult struct {
 // ClaudeCodeAdapter implements Claude Code CLI integration
 type ClaudeCodeAdapter struct {
 	cliPath string
-	workDir string
 	enabled bool
 }
 
 // NewClaudeCodeAdapter creates a new Claude Code adapter
-func NewClaudeCodeAdapter(cliPath, workDir string, enabled bool) *ClaudeCodeAdapter {
-	absWorkDir, err := filepath.Abs(workDir)
-	if err != nil {
-		absWorkDir = workDir
-	}
+func NewClaudeCodeAdapter(cliPath string, enabled bool) *ClaudeCodeAdapter {
 	return &ClaudeCodeAdapter{
 		cliPath: cliPath,
-		workDir: absWorkDir,
 		enabled: enabled,
 	}
 }
@@ -56,24 +50,32 @@ func (c *ClaudeCodeAdapter) IsEnabled() bool {
 	return c.enabled
 }
 
-// SetWorkDir sets the working directory for Claude
-func (c *ClaudeCodeAdapter) SetWorkDir(workDir string) {
-	absWorkDir, err := filepath.Abs(workDir)
-	if err != nil {
-		absWorkDir = workDir
+// resolveWorkDir은 workDir을 절대 경로로 변환한다. 비어있으면 에러를 반환한다.
+func resolveWorkDir(workDir string) (string, error) {
+	if workDir == "" {
+		return "", fmt.Errorf("프로젝트 경로가 설정되지 않았습니다. 채널별 프로젝트 경로를 입력해주세요")
 	}
-	c.workDir = absWorkDir
+	absDir, err := filepath.Abs(workDir)
+	if err != nil {
+		return workDir, nil
+	}
+	return absDir, nil
 }
 
 // AnalyzeIssue launches Claude as a detached background process
-func (c *ClaudeCodeAdapter) AnalyzeIssue(mdFilePath, prompt string) (*AnalysisResult, error) {
+func (c *ClaudeCodeAdapter) AnalyzeIssue(mdFilePath, prompt, workDir string) (*AnalysisResult, error) {
 	if !c.enabled {
 		return nil, fmt.Errorf("Claude integration is not enabled")
 	}
 
+	effectiveDir, err := resolveWorkDir(workDir)
+	if err != nil {
+		return nil, err
+	}
+
 	fmt.Printf("[Claude] Starting analysis...\n")
 	fmt.Printf("[Claude] CLI Path: %s\n", c.cliPath)
-	fmt.Printf("[Claude] Work Dir: %s\n", c.workDir)
+	fmt.Printf("[Claude] Work Dir: %s\n", effectiveDir)
 	fmt.Printf("[Claude] MD File: %s\n", mdFilePath)
 
 	// Read the markdown file content
@@ -135,7 +137,7 @@ echo "✅ 분석 완료: $(date '+%%Y-%%m-%%d %%H:%%M:%%S')" >> "%s"
 
 rm -f /tmp/claude_output_$$.txt "%s" "%s"
 echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Done!"
-`, logFile, c.workDir, c.workDir, promptFile, outputPath, c.cliPath, promptFile, outputPath, outputPath, outputPath, c.workDir, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, promptFile, scriptPath)
+`, logFile, effectiveDir, effectiveDir, promptFile, outputPath, c.cliPath, promptFile, outputPath, outputPath, outputPath, effectiveDir, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, promptFile, scriptPath)
 
 	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
 		return nil, fmt.Errorf("failed to write script: %w", err)
@@ -143,7 +145,7 @@ echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Done!"
 
 	// Launch script as a completely detached background process
 	cmd := exec.Command("nohup", "bash", scriptPath)
-	cmd.Dir = c.workDir
+	cmd.Dir = effectiveDir
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 
@@ -170,9 +172,9 @@ echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Done!"
 }
 
 // SendToClaudeAsync sends the analysis request asynchronously
-func (c *ClaudeCodeAdapter) SendToClaudeAsync(mdFilePath, prompt string, onComplete func(*AnalysisResult, error)) {
+func (c *ClaudeCodeAdapter) SendToClaudeAsync(mdFilePath, prompt, workDir string, onComplete func(*AnalysisResult, error)) {
 	go func() {
-		result, err := c.AnalyzeIssue(mdFilePath, prompt)
+		result, err := c.AnalyzeIssue(mdFilePath, prompt, workDir)
 		if onComplete != nil {
 			onComplete(result, err)
 		}
@@ -193,11 +195,6 @@ func (c *ClaudeCodeAdapter) CheckCLIAvailable() bool {
 // GetCLIPath returns the configured CLI path
 func (c *ClaudeCodeAdapter) GetCLIPath() string {
 	return c.cliPath
-}
-
-// GetWorkDir returns the configured work directory
-func (c *ClaudeCodeAdapter) GetWorkDir() string {
-	return c.workDir
 }
 
 // BuildAnalysisPrompt builds the analysis prompt from a document
@@ -312,15 +309,9 @@ func (c *ClaudeCodeAdapter) AnalyzeAndGeneratePlan(mdFilePath, prompt, workDir s
 		return nil, fmt.Errorf("Claude integration is not enabled")
 	}
 
-	// 채널별 workDir이 지정되면 사용, 아니면 기본값 사용
-	effectiveDir := c.workDir
-	if workDir != "" {
-		absDir, err := filepath.Abs(workDir)
-		if err == nil {
-			effectiveDir = absDir
-		} else {
-			effectiveDir = workDir
-		}
+	effectiveDir, err := resolveWorkDir(workDir)
+	if err != nil {
+		return nil, err
 	}
 
 	fmt.Printf("[Claude] Phase 1: 분석 및 계획 생성 시작...\n")
@@ -469,15 +460,9 @@ func (c *ClaudeCodeAdapter) ExecutePlan(planPath, workDir string) (*AnalysisResu
 		return nil, fmt.Errorf("Claude integration is not enabled")
 	}
 
-	// 채널별 workDir이 지정되면 사용, 아니면 기본값 사용
-	effectiveDir := c.workDir
-	if workDir != "" {
-		absDir, err := filepath.Abs(workDir)
-		if err == nil {
-			effectiveDir = absDir
-		} else {
-			effectiveDir = workDir
-		}
+	effectiveDir, err := resolveWorkDir(workDir)
+	if err != nil {
+		return nil, err
 	}
 
 	fmt.Printf("[Claude] Phase 2: 계획 실행 시작...\n")

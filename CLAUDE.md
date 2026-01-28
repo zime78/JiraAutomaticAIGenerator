@@ -62,7 +62,7 @@ Jira URL 입력 → `ProcessIssueUseCase.Execute()` → Jira 이슈 조회 → �
 
 - **독립 항목**: URL 입력, 프로젝트 경로, 분석 시작 버튼, 진행바, 큐, 상태 라벨, 이슈 정보, AI 분석 결과, 내부 서브탭
 - **공유 항목**: 완료 이력(`completedJobs`), 글로벌 상태 라벨, 전체 중지 버튼, `processIssueUC`, `claudeAdapter`(인스턴스 공유하되 공유 상태 변경 없음)
-- **`ClaudeCodeAdapter` 스레드 안전**: `AnalyzeAndGeneratePlan(mdPath, prompt, workDir)`, `ExecutePlan(planPath, workDir)` 메서드에 `workDir` 파라미터를 직접 전달하여 공유 상태 변경 없이 채널별 독립 실행
+- **`ClaudeCodeAdapter` 스레드 안전**: `AnalyzeAndGeneratePlan(mdPath, prompt, workDir)`, `ExecutePlan(planPath, workDir)`, `AnalyzeIssue(mdPath, prompt, workDir)` 메서드에 `workDir` 파라미터를 직접 전달 (필수, 빈 값 시 에러). 어댑터에 공유 상태 없음
 
 ### ChannelState 구조체 (`app_queue.go`)
 
@@ -111,9 +111,8 @@ prompt_template = 다음 Jira 이슈를 분석하고 수정 코드를 작성해�
 
 [claude]
 cli_path = claude
-work_dir = ./
-project_path_1 = /path/to/project1   # 채널 1 프로젝트 경로
-project_path_2 = /path/to/project2   # 채널 2 프로젝트 경로
-project_path_3 = /path/to/project3   # 채널 3 프로젝트 경로
+project_path_1 = /path/to/project1   # 채널 1 프로젝트 경로 (필수)
+project_path_2 = /path/to/project2   # 채널 2 프로젝트 경로 (필수)
+project_path_3 = /path/to/project3   # 채널 3 프로젝트 경로 (필수)
 enabled = true
 ```
