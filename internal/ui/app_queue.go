@@ -4,13 +4,46 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/widget"
 
 	"jira-ai-generator/internal/adapter"
+	"jira-ai-generator/internal/domain"
 )
+
+// ChannelState는 각 채널의 독립적인 UI 및 상태를 관리한다.
+type ChannelState struct {
+	Index int
+	Name  string
+
+	// 채널별 입력 위젯
+	UrlEntry         *widget.Entry
+	ProjectPathEntry *widget.Entry
+	ProcessBtn       *widget.Button
+	ProgressBar      *widget.ProgressBar
+
+	// 채널별 결과 위젯
+	ResultText      *widget.Entry
+	AnalysisText    *widget.Entry
+	StatusLabel     *widget.Label
+	CopyResultBtn   *widget.Button
+	CopyAnalysisBtn *widget.Button
+	ExecutePlanBtn  *widget.Button
+	QueueList       *widget.List
+	InnerTabs       *container.AppTabs
+
+	// 채널별 상태
+	CurrentDoc          *domain.GeneratedDocument
+	CurrentMDPath       string
+	CurrentAnalysisPath string
+	CurrentPlanPath     string
+	CurrentScriptPath   string
+}
 
 // AnalysisJob represents a running analysis task
 type AnalysisJob struct {
@@ -24,6 +57,7 @@ type AnalysisJob struct {
 	StartTime     string
 	PID           int
 	Phase         adapter.AnalysisPhase // 현재 실행 단계
+	ChannelIndex  int                   // 실행된 채널 인덱스
 }
 
 // AnalysisQueue represents a queue channel for sequential processing
@@ -36,18 +70,20 @@ type AnalysisQueue struct {
 
 // addToQueue adds the current issue to a specific queue
 func (a *App) addToQueue(channelIndex int) {
-	if a.currentDoc == nil || a.currentMDPath == "" {
+	ch := a.channels[channelIndex]
+
+	if ch.CurrentDoc == nil || ch.CurrentMDPath == "" {
 		dialog.ShowError(fmt.Errorf("먼저 이슈를 분석해주세요"), a.mainWindow)
 		return
 	}
 
-	projectPath := a.projectPathEntry.Text
+	projectPath := ch.ProjectPathEntry.Text
 	if projectPath == "" {
 		dialog.ShowError(fmt.Errorf("프로젝트 경로를 입력해주세요"), a.mainWindow)
 		return
 	}
 
-	issueKey := a.currentDoc.IssueKey
+	issueKey := ch.CurrentDoc.IssueKey
 
 	// 전체 큐에서 동일 이슈 중복 체크
 	for i := 0; i < 3; i++ {
@@ -66,18 +102,19 @@ func (a *App) addToQueue(channelIndex int) {
 
 	job := &AnalysisJob{
 		IssueKey:     issueKey,
-		MDPath:       a.currentMDPath,
-		PlanPath:     strings.TrimSuffix(a.currentMDPath, ".md") + "_plan.md",
-		AnalysisPath: strings.TrimSuffix(a.currentMDPath, ".md") + "_plan.md",
-		ScriptPath:   strings.TrimSuffix(a.currentMDPath, ".md") + "_plan_run.sh",
+		MDPath:       ch.CurrentMDPath,
+		PlanPath:     strings.TrimSuffix(ch.CurrentMDPath, ".md") + "_plan.md",
+		AnalysisPath: strings.TrimSuffix(ch.CurrentMDPath, ".md") + "_plan.md",
+		ScriptPath:   strings.TrimSuffix(ch.CurrentMDPath, ".md") + "_plan_run.sh",
 		Phase:        adapter.PhaseAnalyze,
+		ChannelIndex: channelIndex,
 	}
 
 	queue := a.queues[channelIndex]
 	queue.Pending = append(queue.Pending, job)
-	a.queueLists[channelIndex].Refresh()
+	ch.QueueList.Refresh()
 
-	a.statusLabel.SetText(fmt.Sprintf("%s에 %s 추가됨 (대기: %d)", queue.Name, job.IssueKey, len(queue.Pending)))
+	ch.StatusLabel.SetText(fmt.Sprintf("%s에 %s 추가됨 (대기: %d)", queue.Name, job.IssueKey, len(queue.Pending)))
 
 	// If not running, start processing
 	if !queue.IsRunning {
@@ -88,6 +125,8 @@ func (a *App) addToQueue(channelIndex int) {
 // stopQueueCurrent stops the current running job in a queue
 func (a *App) stopQueueCurrent(channelIndex int) {
 	queue := a.queues[channelIndex]
+	ch := a.channels[channelIndex]
+
 	if queue.Current == nil {
 		return
 	}
@@ -96,10 +135,10 @@ func (a *App) stopQueueCurrent(channelIndex int) {
 	cmd := exec.Command("pkill", "-f", queue.Current.ScriptPath)
 	cmd.Run()
 
-	a.statusLabel.SetText(fmt.Sprintf("%s의 %s 중지됨", queue.Name, queue.Current.IssueKey))
+	ch.StatusLabel.SetText(fmt.Sprintf("%s의 %s 중지됨", queue.Name, queue.Current.IssueKey))
 	queue.Current = nil
 	queue.IsRunning = false
-	a.queueLists[channelIndex].Refresh()
+	ch.QueueList.Refresh()
 
 	// Process next in queue
 	if len(queue.Pending) > 0 {
@@ -110,6 +149,7 @@ func (a *App) stopQueueCurrent(channelIndex int) {
 // processQueue processes jobs in a queue sequentially
 func (a *App) processQueue(channelIndex int) {
 	queue := a.queues[channelIndex]
+	ch := a.channels[channelIndex]
 
 	for len(queue.Pending) > 0 {
 		if queue.IsRunning {
@@ -121,47 +161,90 @@ func (a *App) processQueue(channelIndex int) {
 		queue.Pending = queue.Pending[1:]
 		queue.Current = job
 		queue.IsRunning = true
-		a.queueLists[channelIndex].Refresh()
+		ch.QueueList.Refresh()
 
-		fmt.Printf("[Queue] %s: 시작 - %s\n", queue.Name, job.IssueKey)
-		a.statusLabel.SetText(fmt.Sprintf("%s: %s 분석 시작", queue.Name, job.IssueKey))
-
-		// 기존 plan 파일 삭제
-		os.Remove(job.PlanPath)
-
-		// Phase 1: 분석 및 계획 생성
-		prompt := adapter.BuildAnalysisPlanPrompt(job.IssueKey, job.MDPath)
-		result, err := a.claudeAdapter.AnalyzeAndGeneratePlan(job.MDPath, prompt)
-		if err != nil {
-			fmt.Printf("[Queue] %s: 오류 - %s: %v\n", queue.Name, job.IssueKey, err)
-			queue.Current = nil
-			queue.IsRunning = false
-			continue
+		phaseLabel := "Phase 1"
+		if job.Phase == adapter.PhaseExecute {
+			phaseLabel = "Phase 2"
 		}
 
-		job.PID = result.PID
-		job.PlanPath = result.PlanPath
-		job.AnalysisPath = result.PlanPath
-		job.ScriptPath = result.ScriptPath
-		job.LogPath = result.LogPath
-		job.Phase = adapter.PhaseAnalyze
+		fmt.Printf("[Queue] %s: %s 시작 - %s\n", queue.Name, phaseLabel, job.IssueKey)
+		ch.StatusLabel.SetText(fmt.Sprintf("%s: %s %s 시작", queue.Name, job.IssueKey, phaseLabel))
 
-		// App 상태도 업데이트 (새로고침 버튼 등에서 사용)
-		a.currentAnalysisPath = result.PlanPath
-		a.currentPlanPath = result.PlanPath
-		a.currentScriptPath = result.ScriptPath
-
-		a.queueLists[channelIndex].Refresh()
-
-		// Wait for completion
-		a.waitForJobCompletion(channelIndex, job)
+		if job.Phase == adapter.PhaseExecute {
+			a.executePhase2(channelIndex, job)
+		} else {
+			a.executePhase1(channelIndex, job)
+		}
 
 		queue.Current = nil
 		queue.IsRunning = false
-		a.queueLists[channelIndex].Refresh()
+		ch.QueueList.Refresh()
 
-		fmt.Printf("[Queue] %s: 완료 - %s\n", queue.Name, job.IssueKey)
+		fmt.Printf("[Queue] %s: %s 완료 - %s\n", queue.Name, phaseLabel, job.IssueKey)
 	}
+}
+
+// executePhase1은 Phase 1: 읽기 전용 분석을 실행한다.
+func (a *App) executePhase1(channelIndex int, job *AnalysisJob) {
+	ch := a.channels[channelIndex]
+
+	// 기존 plan 파일 삭제
+	os.Remove(job.PlanPath)
+
+	prompt := adapter.BuildAnalysisPlanPrompt(job.IssueKey, job.MDPath)
+	projectPath := strings.TrimSpace(ch.ProjectPathEntry.Text)
+	result, err := a.claudeAdapter.AnalyzeAndGeneratePlan(job.MDPath, prompt, projectPath)
+	if err != nil {
+		fmt.Printf("[Queue] %s: 오류 - %s: %v\n", a.queues[channelIndex].Name, job.IssueKey, err)
+		ch.StatusLabel.SetText(fmt.Sprintf("오류: %s - %v", job.IssueKey, err))
+		return
+	}
+
+	job.PID = result.PID
+	job.PlanPath = result.PlanPath
+	job.AnalysisPath = result.PlanPath
+	job.ScriptPath = result.ScriptPath
+	job.LogPath = result.LogPath
+	job.Phase = adapter.PhaseAnalyze
+
+	// 채널별 상태 업데이트
+	ch.CurrentAnalysisPath = result.PlanPath
+	ch.CurrentPlanPath = result.PlanPath
+	ch.CurrentScriptPath = result.ScriptPath
+
+	ch.QueueList.Refresh()
+
+	// Wait for completion
+	a.waitForJobCompletion(channelIndex, job)
+}
+
+// executePhase2는 Phase 2: plan 파일을 실행한다.
+func (a *App) executePhase2(channelIndex int, job *AnalysisJob) {
+	ch := a.channels[channelIndex]
+
+	projectPath := strings.TrimSpace(ch.ProjectPathEntry.Text)
+	result, err := a.claudeAdapter.ExecutePlan(job.PlanPath, projectPath)
+	if err != nil {
+		fmt.Printf("[Queue] %s: Phase 2 오류 - %s: %v\n", a.queues[channelIndex].Name, job.IssueKey, err)
+		ch.StatusLabel.SetText(fmt.Sprintf("Phase 2 오류: %s - %v", job.IssueKey, err))
+		return
+	}
+
+	job.PID = result.PID
+	job.AnalysisPath = result.OutputPath
+	job.ExecutionPath = result.OutputPath
+	job.ScriptPath = result.ScriptPath
+	job.LogPath = strings.TrimSuffix(result.OutputPath, "_execution.md") + "_exec_log.txt"
+
+	// 채널별 상태 업데이트
+	ch.CurrentAnalysisPath = result.OutputPath
+	ch.CurrentScriptPath = result.ScriptPath
+
+	ch.QueueList.Refresh()
+
+	// Wait for completion
+	a.waitForJobCompletion(channelIndex, job)
 }
 
 // waitForJobCompletion waits for a job to complete while displaying progress
@@ -177,6 +260,7 @@ func (a *App) waitForJobCompletion(channelIndex int, job *AnalysisJob) {
 		phaseLabel = "Phase 2"
 	}
 
+	ch := a.channels[channelIndex]
 	queueName := a.queues[channelIndex].Name
 
 	for range ticker.C {
@@ -191,30 +275,32 @@ func (a *App) waitForJobCompletion(channelIndex int, job *AnalysisJob) {
 
 			job.StartTime = elapsedStr
 
-			// plan 파일 우선 로드
+			// 결과 파일 로드
 			resultPath := job.AnalysisPath
-			if job.PlanPath != "" {
+			if job.Phase == adapter.PhaseAnalyze && job.PlanPath != "" {
 				resultPath = job.PlanPath
 			}
 			if content, err := os.ReadFile(resultPath); err == nil {
-				a.analysisText.SetText(string(content))
-				a.copyAnalysisBtn.Enable()
+				ch.AnalysisText.SetText(string(content))
+				ch.CopyAnalysisBtn.Enable()
 			}
 
 			// Phase 1 완료 시 "계획 실행" 버튼 활성화
 			if job.Phase == adapter.PhaseAnalyze && job.PlanPath != "" {
-				a.currentPlanPath = job.PlanPath
-				a.executePlanBtn.Enable()
+				ch.CurrentPlanPath = job.PlanPath
+				ch.ExecutePlanBtn.Enable()
 			}
 
 			// 완료 작업 목록에 추가
+			a.mu.Lock()
 			a.completedJobs = append([]*AnalysisJob{job}, a.completedJobs...)
+			a.mu.Unlock()
 			if a.historyList != nil {
 				a.historyList.Refresh()
 			}
 
 			fmt.Printf("[Queue] %s: %s %s 완료 (%s)\n", queueName, job.IssueKey, phaseLabel, elapsedStr)
-			a.statusLabel.SetText(fmt.Sprintf("✅ %s: %s %s 완료 (%s)", queueName, job.IssueKey, phaseLabel, elapsedStr))
+			ch.StatusLabel.SetText(fmt.Sprintf("✅ %s %s 완료 (%s)", job.IssueKey, phaseLabel, elapsedStr))
 			return
 		}
 
@@ -235,11 +321,13 @@ func (a *App) waitForJobCompletion(channelIndex int, job *AnalysisJob) {
 					status = "Claude 실행 중..."
 				} else if strings.Contains(logStr, "Phase 1") {
 					status = "시작 중..."
+				} else if strings.Contains(logStr, "Phase 2") {
+					status = "실행 중..."
 				}
 			}
 		}
 		// 매 틱마다 경과시간 갱신
-		a.statusLabel.SetText(fmt.Sprintf("⏳ %s %s: %s %s (경과: %s)", queueName, phaseLabel, job.IssueKey, status, elapsedStr))
+		ch.StatusLabel.SetText(fmt.Sprintf("⏳ %s: %s %s (경과: %s)", job.IssueKey, phaseLabel, status, elapsedStr))
 	}
 }
 
@@ -248,6 +336,7 @@ func (a *App) onStopAllQueues() {
 	stoppedCount := 0
 	for i := 0; i < 3; i++ {
 		queue := a.queues[i]
+		ch := a.channels[i]
 
 		// Stop current job
 		if queue.Current != nil {
@@ -261,9 +350,20 @@ func (a *App) onStopAllQueues() {
 		stoppedCount += len(queue.Pending)
 		queue.Pending = []*AnalysisJob{}
 		queue.IsRunning = false
-		a.queueLists[i].Refresh()
+		ch.QueueList.Refresh()
+		ch.StatusLabel.SetText("중지됨")
 	}
 
 	a.statusLabel.SetText(fmt.Sprintf("전체 중지됨 (작업 %d개)", stoppedCount))
 	dialog.ShowInformation("전체 중지", fmt.Sprintf("%d개 작업이 중지되었습니다.", stoppedCount), a.mainWindow)
+}
+
+// extractIssueKeyFromPath는 파일 경로에서 이슈 키를 추출한다.
+func extractIssueKeyFromPath(path string) string {
+	base := filepath.Base(path)
+	base = strings.TrimSuffix(base, "_plan.md")
+	base = strings.TrimSuffix(base, "_execution.md")
+	base = strings.TrimSuffix(base, "_analysis.md")
+	base = strings.TrimSuffix(base, ".md")
+	return base
 }

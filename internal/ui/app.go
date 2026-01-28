@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"sync"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
@@ -8,12 +10,12 @@ import (
 
 	"jira-ai-generator/internal/adapter"
 	"jira-ai-generator/internal/config"
-	"jira-ai-generator/internal/domain"
 	"jira-ai-generator/internal/usecase"
 )
 
 // App represents the main application
 type App struct {
+	mu         sync.Mutex // 동시 접근 보호 (completedJobs 전용)
 	fyneApp    fyne.App
 	mainWindow fyne.Window
 	config     *config.Config
@@ -23,33 +25,18 @@ type App struct {
 	docGenerator   *adapter.MarkdownGenerator
 	claudeAdapter  *adapter.ClaudeCodeAdapter
 
-	// UI components
-	urlEntry         *widget.Entry
-	projectPathEntry *widget.Entry
-	resultText       *widget.Entry
-	analysisText     *widget.Entry
-	progressBar      *widget.ProgressBar
-	statusLabel      *widget.Label
-	processBtn       *widget.Button
-	copyBtn          *widget.Button
-	stopAnalysisBtn  *widget.Button
-	copyAnalysisBtn  *widget.Button
-	jobsList         *widget.List
-	tabs             *container.AppTabs
-	queueLists       [3]*widget.List
-	historyList      *widget.List
+	// UI components (글로벌)
+	statusLabel *widget.Label
+	stopAllBtn  *widget.Button
+	tabs        *container.AppTabs // 채널 탭 (채널1/채널2/채널3)
+	historyList *widget.List
+
+	// 채널별 독립 UI 및 상태
+	channels [3]*ChannelState
 
 	// Processing state
-	currentDoc          *domain.GeneratedDocument
-	currentMDPath       string
-	currentAnalysisPath string
-	currentPlanPath     string // Phase 1 결과 plan 파일 경로
-	currentScriptPath   string
-	runningJobs         []*AnalysisJob
-	selectedJobIndex    int
-	queues              [3]*AnalysisQueue
-	completedJobs       []*AnalysisJob
-	executePlanBtn      *widget.Button // "계획 실행" 버튼
+	queues        [3]*AnalysisQueue
+	completedJobs []*AnalysisJob
 }
 
 // NewApp creates a new application instance with dependency injection
@@ -73,6 +60,11 @@ func NewApp(cfg *config.Config) *App {
 		processIssueUC: processIssueUC,
 		docGenerator:   docGenerator,
 		claudeAdapter:  claudeAdapter,
+		channels: [3]*ChannelState{
+			{Index: 0, Name: "채널 1"},
+			{Index: 1, Name: "채널 2"},
+			{Index: 2, Name: "채널 3"},
+		},
 		queues: [3]*AnalysisQueue{
 			{Name: "채널 1", Pending: []*AnalysisJob{}},
 			{Name: "채널 2", Pending: []*AnalysisJob{}},

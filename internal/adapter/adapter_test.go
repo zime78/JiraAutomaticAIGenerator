@@ -125,7 +125,7 @@ func TestBuildAnalysisPlanPrompt_DifferentFromLegacy(t *testing.T) {
 func TestAnalyzeAndGeneratePlan_Disabled(t *testing.T) {
 	// Claude 비활성 상태에서 호출 시 에러 반환
 	claude := adapter.NewClaudeCodeAdapter("claude", "/tmp", false)
-	_, err := claude.AnalyzeAndGeneratePlan("/test/test.md", "test prompt")
+	_, err := claude.AnalyzeAndGeneratePlan("/test/test.md", "test prompt", "")
 	if err == nil {
 		t.Error("비활성 상태에서 에러가 반환되어야 합니다")
 	}
@@ -134,7 +134,7 @@ func TestAnalyzeAndGeneratePlan_Disabled(t *testing.T) {
 func TestExecutePlan_Disabled(t *testing.T) {
 	// Claude 비활성 상태에서 호출 시 에러 반환
 	claude := adapter.NewClaudeCodeAdapter("claude", "/tmp", false)
-	_, err := claude.ExecutePlan("/test/plan.md")
+	_, err := claude.ExecutePlan("/test/plan.md", "")
 	if err == nil {
 		t.Error("비활성 상태에서 에러가 반환되어야 합니다")
 	}
@@ -143,7 +143,7 @@ func TestExecutePlan_Disabled(t *testing.T) {
 func TestExecutePlan_FileNotFound(t *testing.T) {
 	// 존재하지 않는 plan 파일 호출 시 에러 반환
 	claude := adapter.NewClaudeCodeAdapter("claude", "/tmp", true)
-	_, err := claude.ExecutePlan("/nonexistent/plan.md")
+	_, err := claude.ExecutePlan("/nonexistent/plan.md", "")
 	if err == nil {
 		t.Error("존재하지 않는 파일에 대해 에러가 반환되어야 합니다")
 	}

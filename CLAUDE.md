@@ -50,11 +50,33 @@ Jira URL 입력 → `ProcessIssueUseCase.Execute()` → Jira 이슈 조회 → �
 
 | 파일 | 용도 |
 |------|------|
-| `app.go` | App 구조체, 생성자(`NewApp`), 상태 필드 |
-| `app_ui.go` | UI 위젯 생성 |
-| `app_handlers.go` | 버튼 이벤트 핸들러 |
-| `app_queue.go` | 3채널 분석 큐 관리 |
-| `app_analysis.go` | Claude Code 연동, 로그 모니터링 |
+| `app.go` | App 구조체, 생성자(`NewApp`), 글로벌 상태 필드 |
+| `app_ui.go` | UI 위젯 생성 (`createMainContent`, `createChannelTab`, `createHistoryPanel`) |
+| `app_handlers.go` | 채널별 버튼 이벤트 핸들러 (`onChannelProcess`, `onCopyChannelResult`) |
+| `app_queue.go` | `ChannelState` 구조체, 3채널 독립 큐 관리, Phase 1/2 실행 |
+| `app_analysis.go` | Claude Code 연동, 완료 결과 로드, 이력 관리 |
+
+### 채널별 완전 독립 워크스페이스
+
+각 채널(1/2/3)은 완전히 독립된 워크스페이스로 동작:
+
+- **독립 항목**: URL 입력, 프로젝트 경로, 분석 시작 버튼, 진행바, 큐, 상태 라벨, 이슈 정보, AI 분석 결과, 내부 서브탭
+- **공유 항목**: 완료 이력(`completedJobs`), 글로벌 상태 라벨, 전체 중지 버튼, `processIssueUC`, `claudeAdapter`(인스턴스 공유하되 공유 상태 변경 없음)
+- **`ClaudeCodeAdapter` 스레드 안전**: `AnalyzeAndGeneratePlan(mdPath, prompt, workDir)`, `ExecutePlan(planPath, workDir)` 메서드에 `workDir` 파라미터를 직접 전달하여 공유 상태 변경 없이 채널별 독립 실행
+
+### ChannelState 구조체 (`app_queue.go`)
+
+```go
+type ChannelState struct {
+    Index, Name                              // 채널 식별
+    UrlEntry, ProjectPathEntry, ProcessBtn   // 채널별 입력 위젯
+    ProgressBar, ResultText, AnalysisText    // 채널별 결과 위젯
+    StatusLabel, CopyResultBtn, CopyAnalysisBtn, ExecutePlanBtn
+    QueueList, InnerTabs                     // 큐 목록, [이슈 정보|AI 분석] 서브탭
+    CurrentDoc, CurrentMDPath                // 채널별 상태
+    CurrentAnalysisPath, CurrentPlanPath, CurrentScriptPath
+}
+```
 
 ## TDD 개발 순서
 
@@ -72,3 +94,26 @@ Jira URL 입력 → `ProcessIssueUseCase.Execute()` → Jira 이슈 조회 → �
 - 에러: `fmt.Errorf("failed to ...: %w", err)` 형태로 래핑
 - 구체 타입이 아닌 인터페이스로 의존성 주입
 - 설정: `config.ini` (INI 형식, `gopkg.in/ini.v1`) — 로딩 순서: 현재 디렉토리 → `~/.jira-ai-generator/config.ini`
+
+## config.ini 설정
+
+```ini
+[jira]
+url = https://example.atlassian.net
+email = user@example.com
+api_key = YOUR_API_KEY
+
+[output]
+dir = ./output
+
+[ai]
+prompt_template = 다음 Jira 이슈를 분석하고 수정 코드를 작성해주세요:
+
+[claude]
+cli_path = claude
+work_dir = ./
+project_path_1 = /path/to/project1   # 채널 1 프로젝트 경로
+project_path_2 = /path/to/project2   # 채널 2 프로젝트 경로
+project_path_3 = /path/to/project3   # 채널 3 프로젝트 경로
+enabled = true
+```

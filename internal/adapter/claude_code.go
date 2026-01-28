@@ -307,14 +307,25 @@ func BuildAnalysisPlanPrompt(issueKey, mdPath string) string {
 // AnalyzeAndGeneratePlan은 Phase 1: 읽기 전용 분석을 실행하고 _plan.md를 생성한다.
 // 기존 AnalyzeIssue와 유사하지만, 결과를 Jira 컨텍스트 + 분석 결과 + 실행 지시사항으로
 // 구조화된 plan 파일로 조립한다.
-func (c *ClaudeCodeAdapter) AnalyzeAndGeneratePlan(mdFilePath, prompt string) (*PlanResult, error) {
+func (c *ClaudeCodeAdapter) AnalyzeAndGeneratePlan(mdFilePath, prompt, workDir string) (*PlanResult, error) {
 	if !c.enabled {
 		return nil, fmt.Errorf("Claude integration is not enabled")
 	}
 
+	// 채널별 workDir이 지정되면 사용, 아니면 기본값 사용
+	effectiveDir := c.workDir
+	if workDir != "" {
+		absDir, err := filepath.Abs(workDir)
+		if err == nil {
+			effectiveDir = absDir
+		} else {
+			effectiveDir = workDir
+		}
+	}
+
 	fmt.Printf("[Claude] Phase 1: 분석 및 계획 생성 시작...\n")
 	fmt.Printf("[Claude] CLI Path: %s\n", c.cliPath)
-	fmt.Printf("[Claude] Work Dir: %s\n", c.workDir)
+	fmt.Printf("[Claude] Work Dir: %s\n", effectiveDir)
 	fmt.Printf("[Claude] MD File: %s\n", mdFilePath)
 
 	// 마크다운 파일 읽기
@@ -412,11 +423,11 @@ echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Plan file created: %s"
 rm -f /tmp/claude_plan_$$.txt "%s"
 echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Phase 1 완료!"
 `,
-		logFile, c.workDir, c.workDir, promptFile, planPath,
+		logFile, effectiveDir, effectiveDir, promptFile, planPath,
 		c.cliPath, promptFile,
 		planPath,
 		planPath, planPath, mdFilePath, planPath, planPath, planPath, planPath,
-		planPath, planPath, planPath, c.workDir, planPath, planPath,
+		planPath, planPath, planPath, effectiveDir, planPath, planPath,
 		planPath, planPath, planPath, planPath, planPath,
 		planPath,
 		planPath, planPath,
@@ -428,7 +439,7 @@ echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Phase 1 완료!"
 
 	// 백그라운드 프로세스로 실행
 	cmd := exec.Command("nohup", "bash", scriptPath)
-	cmd.Dir = c.workDir
+	cmd.Dir = effectiveDir
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 
@@ -453,9 +464,20 @@ echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Phase 1 완료!"
 }
 
 // ExecutePlan은 Phase 2: plan 파일을 Claude Code에 전달하여 실제 코드 수정을 실행한다.
-func (c *ClaudeCodeAdapter) ExecutePlan(planPath string) (*AnalysisResult, error) {
+func (c *ClaudeCodeAdapter) ExecutePlan(planPath, workDir string) (*AnalysisResult, error) {
 	if !c.enabled {
 		return nil, fmt.Errorf("Claude integration is not enabled")
+	}
+
+	// 채널별 workDir이 지정되면 사용, 아니면 기본값 사용
+	effectiveDir := c.workDir
+	if workDir != "" {
+		absDir, err := filepath.Abs(workDir)
+		if err == nil {
+			effectiveDir = absDir
+		} else {
+			effectiveDir = workDir
+		}
 	}
 
 	fmt.Printf("[Claude] Phase 2: 계획 실행 시작...\n")
@@ -520,9 +542,9 @@ echo "✅ 실행 완료: $(date '+%%Y-%%m-%%d %%H:%%M:%%S')" >> "%s"
 rm -f /tmp/claude_exec_$$.txt "%s" "%s"
 echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Phase 2 완료!"
 `,
-		logFile, c.workDir, c.workDir, promptFile, executionPath,
+		logFile, effectiveDir, effectiveDir, promptFile, executionPath,
 		c.cliPath, promptFile,
-		executionPath, executionPath, executionPath, c.workDir, executionPath,
+		executionPath, executionPath, executionPath, effectiveDir, executionPath,
 		executionPath, executionPath, executionPath,
 		executionPath, executionPath,
 		executionPath, executionPath, executionPath, executionPath, executionPath,
@@ -534,7 +556,7 @@ echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Phase 2 완료!"
 
 	// 백그라운드 프로세스로 실행
 	cmd := exec.Command("nohup", "bash", scriptPath)
-	cmd.Dir = c.workDir
+	cmd.Dir = effectiveDir
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 
@@ -557,9 +579,9 @@ echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Phase 2 완료!"
 }
 
 // SendPlanToClaudeAsync는 Phase 1 분석을 비동기적으로 실행한다.
-func (c *ClaudeCodeAdapter) SendPlanToClaudeAsync(mdFilePath, prompt string, onComplete func(*PlanResult, error)) {
+func (c *ClaudeCodeAdapter) SendPlanToClaudeAsync(mdFilePath, prompt, workDir string, onComplete func(*PlanResult, error)) {
 	go func() {
-		result, err := c.AnalyzeAndGeneratePlan(mdFilePath, prompt)
+		result, err := c.AnalyzeAndGeneratePlan(mdFilePath, prompt, workDir)
 		if onComplete != nil {
 			onComplete(result, err)
 		}

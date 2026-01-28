@@ -35,10 +35,10 @@ type AIConfig struct {
 
 // ClaudeConfig holds Claude Code CLI settings
 type ClaudeConfig struct {
-	CLIPath     string
-	WorkDir     string
-	ProjectPath string
-	Enabled     bool
+	CLIPath      string
+	WorkDir      string
+	ChannelPaths [3]string // 채널별 프로젝트 경로
+	Enabled      bool
 }
 
 // Load reads configuration from the specified INI file
@@ -68,7 +68,11 @@ func Load(path string) (*Config, error) {
 	claudeSection := cfg.Section("claude")
 	config.Claude.CLIPath = claudeSection.Key("cli_path").MustString("claude")
 	config.Claude.WorkDir = claudeSection.Key("work_dir").MustString("./")
-	config.Claude.ProjectPath = claudeSection.Key("project_path").MustString("")
+	config.Claude.ChannelPaths = [3]string{
+		claudeSection.Key("project_path_1").MustString(""),
+		claudeSection.Key("project_path_2").MustString(""),
+		claudeSection.Key("project_path_3").MustString(""),
+	}
 	config.Claude.Enabled = claudeSection.Key("enabled").MustBool(false)
 
 	return config, nil
