@@ -37,3 +37,9 @@ fyne-cross/
 *.tmp
 *.log
 /tmp/
+
+# oh-my-claudecode (로컬 세션 상태)
+.omc/
+
+# PDCA 문서 (로컬 개발용)
+docs/

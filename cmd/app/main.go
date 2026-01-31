@@ -26,5 +26,9 @@ func main() {
 
 	// Create and run application
 	app := ui.NewApp(cfg)
-	app.Run()
+	if app.UseV2UI() {
+		app.RunV2()
+	} else {
+		app.Run()
+	}
 }
