@@ -350,8 +350,12 @@ func (a *App) onStopAllQueues() {
 		stoppedCount += len(queue.Pending)
 		queue.Pending = []*AnalysisJob{}
 		queue.IsRunning = false
-		ch.QueueList.Refresh()
-		ch.StatusLabel.SetText("중지됨")
+		if ch.QueueList != nil {
+			ch.QueueList.Refresh()
+		}
+		if ch.StatusLabel != nil {
+			ch.StatusLabel.SetText("중지됨")
+		}
 	}
 
 	a.statusLabel.SetText(fmt.Sprintf("전체 중지됨 (작업 %d개)", stoppedCount))

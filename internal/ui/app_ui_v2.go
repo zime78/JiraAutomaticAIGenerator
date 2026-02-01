@@ -155,6 +155,10 @@ func (a *App) createMainContentV2(v2 *AppV2State) fyne.CanvasObject {
 		}
 	})
 
+	v2.sidebar.SetOnSettingsClick(func() {
+		a.showSettingsDialog()
+	})
+
 	// 채널 탭 생성 (새 컴포넌트 사용)
 	a.tabs = container.NewAppTabs(
 		container.NewTabItem("채널 1", a.createChannelTabV2(0, v2)),
@@ -388,7 +392,7 @@ func (a *App) UseV2UI() bool {
 // RunV2 V2 UI로 앱 실행
 func (a *App) RunV2() {
 	a.mainWindow = a.fyneApp.NewWindow("Jira AI Generator v2")
-	a.mainWindow.Resize(fyne.NewSize(1600, 1000))
+	a.mainWindow.Resize(fyne.NewSize(1920, 1080))
 	a.mainWindow.CenterOnScreen()
 
 	v2 := a.initV2State()

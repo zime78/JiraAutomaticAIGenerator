@@ -35,14 +35,29 @@ type PlanResult struct {
 type ClaudeCodeAdapter struct {
 	cliPath string
 	enabled bool
+	model   string
 }
 
 // NewClaudeCodeAdapter creates a new Claude Code adapter
-func NewClaudeCodeAdapter(cliPath string, enabled bool) *ClaudeCodeAdapter {
+func NewClaudeCodeAdapter(cliPath string, enabled bool, model string) *ClaudeCodeAdapter {
+	if model == "" {
+		model = "claude-sonnet-4-20250514"
+	}
 	return &ClaudeCodeAdapter{
 		cliPath: cliPath,
 		enabled: enabled,
+		model:   model,
 	}
+}
+
+// GetModel returns the configured model
+func (c *ClaudeCodeAdapter) GetModel() string {
+	return c.model
+}
+
+// SetModel updates the model
+func (c *ClaudeCodeAdapter) SetModel(model string) {
+	c.model = model
 }
 
 // IsEnabled returns whether Claude integration is enabled
@@ -107,7 +122,7 @@ echo "Prompt file: %s"
 echo "Output file: %s"
 echo ""
 echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Running Claude..."
-%s --print "$(cat '%s')" --output-format text > /tmp/claude_output_$$.txt 2>&1
+%s --model %s --print "$(cat '%s')" --output-format text > /tmp/claude_output_$$.txt 2>&1
 CLAUDE_EXIT=$?
 echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Claude exited with code: $CLAUDE_EXIT"
 echo "Output size: $(wc -c < /tmp/claude_output_$$.txt) bytes"
@@ -137,7 +152,7 @@ echo "✅ 분석 완료: $(date '+%%Y-%%m-%%d %%H:%%M:%%S')" >> "%s"
 
 rm -f /tmp/claude_output_$$.txt "%s" "%s"
 echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Done!"
-`, logFile, effectiveDir, effectiveDir, promptFile, outputPath, c.cliPath, promptFile, outputPath, outputPath, outputPath, effectiveDir, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, promptFile, scriptPath)
+`, logFile, effectiveDir, effectiveDir, promptFile, outputPath, c.cliPath, c.model, promptFile, outputPath, outputPath, outputPath, effectiveDir, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, promptFile, scriptPath)
 
 	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
 		return nil, fmt.Errorf("failed to write script: %w", err)
@@ -348,7 +363,7 @@ echo "Prompt file: %s"
 echo "Plan file: %s"
 echo ""
 echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Running Claude (Phase 1 - 분석)..."
-%s --print "$(cat '%s')" --output-format text > /tmp/claude_plan_$$.txt 2>&1
+%s --model %s --print "$(cat '%s')" --output-format text > /tmp/claude_plan_$$.txt 2>&1
 CLAUDE_EXIT=$?
 echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Claude exited with code: $CLAUDE_EXIT"
 echo "Output size: $(wc -c < /tmp/claude_plan_$$.txt) bytes"
@@ -415,7 +430,7 @@ rm -f /tmp/claude_plan_$$.txt "%s"
 echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Phase 1 완료!"
 `,
 		logFile, effectiveDir, effectiveDir, promptFile, planPath,
-		c.cliPath, promptFile,
+		c.cliPath, c.model, promptFile,
 		planPath,
 		planPath, planPath, mdFilePath, planPath, planPath, planPath, planPath,
 		planPath, planPath, planPath, effectiveDir, planPath, planPath,
@@ -496,7 +511,7 @@ echo "Prompt file: %s"
 echo "Output file: %s"
 echo ""
 echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Running Claude (Phase 2 - 실행)..."
-%s --print "$(cat '%s')" --output-format text > /tmp/claude_exec_$$.txt 2>&1
+%s --model %s --print "$(cat '%s')" --output-format text > /tmp/claude_exec_$$.txt 2>&1
 CLAUDE_EXIT=$?
 echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Claude exited with code: $CLAUDE_EXIT"
 echo "Output size: $(wc -c < /tmp/claude_exec_$$.txt) bytes"
@@ -528,7 +543,7 @@ rm -f /tmp/claude_exec_$$.txt "%s" "%s"
 echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Phase 2 완료!"
 `,
 		logFile, effectiveDir, effectiveDir, promptFile, executionPath,
-		c.cliPath, promptFile,
+		c.cliPath, c.model, promptFile,
 		executionPath, executionPath, executionPath, effectiveDir, executionPath,
 		executionPath, executionPath, executionPath,
 		executionPath, executionPath,

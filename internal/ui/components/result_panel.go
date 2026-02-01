@@ -3,6 +3,7 @@ package components
 import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -15,11 +16,15 @@ type ResultPanel struct {
 	// 탭
 	tabs *container.AppTabs
 
-	// 이슈 정보 탭
-	issueInfoText *widget.Entry
+	// 이슈 정보 탭 (MarkdownViewer 사용)
+	issueViewer *MarkdownViewer
 
-	// AI 분석 결과 탭
-	analysisText *widget.Entry
+	// AI 분석 결과 탭 (MarkdownViewer 사용)
+	analysisViewer *MarkdownViewer
+
+	// 검색 버튼
+	searchIssueBtn    *widget.Button
+	searchAnalysisBtn *widget.Button
 
 	// 액션 버튼
 	copyIssueBtn    *widget.Button
@@ -38,15 +43,20 @@ type ResultPanel struct {
 func NewResultPanel() *ResultPanel {
 	r := &ResultPanel{}
 
-	// 이슈 정보 텍스트 영역
-	r.issueInfoText = widget.NewMultiLineEntry()
-	r.issueInfoText.Wrapping = fyne.TextWrapWord
-	r.issueInfoText.SetPlaceHolder("이슈 정보가 여기에 표시됩니다...")
+	// 이슈 정보 MarkdownViewer
+	r.issueViewer = NewMarkdownViewer()
 
-	// AI 분석 결과 텍스트 영역
-	r.analysisText = widget.NewMultiLineEntry()
-	r.analysisText.Wrapping = fyne.TextWrapWord
-	r.analysisText.SetPlaceHolder("AI 분석 결과가 여기에 표시됩니다...")
+	// AI 분석 결과 MarkdownViewer
+	r.analysisViewer = NewMarkdownViewer()
+
+	// 검색 버튼들
+	r.searchIssueBtn = widget.NewButtonWithIcon("", theme.SearchIcon(), func() {
+		r.issueViewer.ShowSearch()
+	})
+
+	r.searchAnalysisBtn = widget.NewButtonWithIcon("", theme.SearchIcon(), func() {
+		r.analysisViewer.ShowSearch()
+	})
 
 	// 액션 버튼들
 	r.copyIssueBtn = widget.NewButton("📋 이슈 복사", func() {
@@ -78,16 +88,18 @@ func NewResultPanel() *ResultPanel {
 	r.executePlanBtn.Disable()
 
 	// 이슈 정보 탭 컨텐츠
+	issueActions := container.NewHBox(r.searchIssueBtn, r.copyIssueBtn)
 	issueContent := container.NewBorder(
 		nil,
-		container.NewHBox(r.copyIssueBtn),
+		issueActions,
 		nil,
 		nil,
-		container.NewScroll(r.issueInfoText),
+		r.issueViewer,
 	)
 
 	// AI 분석 탭 컨텐츠
 	analysisActions := container.NewHBox(
+		r.searchAnalysisBtn,
 		r.copyAnalysisBtn,
 		r.executePlanBtn,
 		r.exportBtn,
@@ -97,7 +109,7 @@ func NewResultPanel() *ResultPanel {
 		analysisActions,
 		nil,
 		nil,
-		container.NewScroll(r.analysisText),
+		r.analysisViewer,
 	)
 
 	// 탭 구성
@@ -125,7 +137,7 @@ func (r *ResultPanel) CreateRenderer() fyne.WidgetRenderer {
 
 // SetIssueInfo 이슈 정보 설정
 func (r *ResultPanel) SetIssueInfo(content string) {
-	r.issueInfoText.SetText(content)
+	r.issueViewer.SetContent(content)
 	if content != "" {
 		r.copyIssueBtn.Enable()
 	} else {
@@ -135,7 +147,7 @@ func (r *ResultPanel) SetIssueInfo(content string) {
 
 // SetAnalysis AI 분석 결과 설정
 func (r *ResultPanel) SetAnalysis(content string) {
-	r.analysisText.SetText(content)
+	r.analysisViewer.SetContent(content)
 	if content != "" {
 		r.copyAnalysisBtn.Enable()
 		r.exportBtn.Enable()
@@ -187,21 +199,31 @@ func (r *ResultPanel) SelectAnalysisTab() {
 
 // GetIssueInfo 이슈 정보 조회
 func (r *ResultPanel) GetIssueInfo() string {
-	return r.issueInfoText.Text
+	return r.issueViewer.GetContent()
 }
 
 // GetAnalysis AI 분석 결과 조회
 func (r *ResultPanel) GetAnalysis() string {
-	return r.analysisText.Text
+	return r.analysisViewer.GetContent()
 }
 
 // Reset 상태 초기화
 func (r *ResultPanel) Reset() {
-	r.issueInfoText.SetText("")
-	r.analysisText.SetText("")
+	r.issueViewer.Reset()
+	r.analysisViewer.Reset()
 	r.copyIssueBtn.Disable()
 	r.copyAnalysisBtn.Disable()
 	r.exportBtn.Disable()
 	r.executePlanBtn.Disable()
 	r.tabs.SelectIndex(0)
+}
+
+// ShowIssueSearch 이슈 정보 검색 표시
+func (r *ResultPanel) ShowIssueSearch() {
+	r.issueViewer.ShowSearch()
+}
+
+// ShowAnalysisSearch 분석 결과 검색 표시
+func (r *ResultPanel) ShowAnalysisSearch() {
+	r.analysisViewer.ShowSearch()
 }

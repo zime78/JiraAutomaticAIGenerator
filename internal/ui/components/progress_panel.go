@@ -104,6 +104,11 @@ func (p *ProgressPanel) CreateRenderer() fyne.WidgetRenderer {
 
 // SetPhase 현재 단계 설정
 func (p *ProgressPanel) SetPhase(phase state.ProcessPhase) {
+	// 변경이 없으면 스킵
+	if p.currentPhase == phase {
+		return
+	}
+
 	p.currentPhase = phase
 	p.progress = phase.Progress()
 	p.progressBar.SetValue(p.progress)
@@ -121,8 +126,6 @@ func (p *ProgressPanel) SetPhase(phase state.ProcessPhase) {
 			item.SetStatus(state.StepPending)
 		}
 	}
-
-	p.Refresh()
 }
 
 // SetProgress 진행률 설정
@@ -138,8 +141,6 @@ func (p *ProgressPanel) SetProgress(progress float64, message string) {
 			break
 		}
 	}
-
-	p.Refresh()
 }
 
 // SetStepProgress 특정 단계의 진행률 설정
@@ -148,7 +149,6 @@ func (p *ProgressPanel) SetStepProgress(stepIndex int, progress float64, message
 		p.stepItems[stepIndex].SetProgress(progress)
 		p.messageLabel.SetText(message)
 	}
-	p.Refresh()
 }
 
 // Reset 상태 초기화
@@ -163,8 +163,6 @@ func (p *ProgressPanel) Reset() {
 		item.SetStatus(state.StepPending)
 		item.SetProgress(0)
 	}
-
-	p.Refresh()
 }
 
 // SetError 에러 상태 표시
@@ -179,8 +177,6 @@ func (p *ProgressPanel) SetError(errMsg string) {
 			break
 		}
 	}
-
-	p.Refresh()
 }
 
 // SetComplete 완료 상태 표시
@@ -194,8 +190,6 @@ func (p *ProgressPanel) SetComplete() {
 	for _, item := range p.stepItems {
 		item.SetStatus(state.StepCompleted)
 	}
-
-	p.Refresh()
 }
 
 // NewStepItem 새 StepItem 생성
@@ -226,6 +220,11 @@ func (s *StepItem) CreateRenderer() fyne.WidgetRenderer {
 
 // SetStatus 상태 설정
 func (s *StepItem) SetStatus(status state.StepStatus) {
+	// 변경이 없으면 스킵
+	if s.status == status {
+		return
+	}
+
 	s.status = status
 
 	switch status {
@@ -249,7 +248,6 @@ func (s *StepItem) SetStatus(status state.StepStatus) {
 
 	s.icon.Refresh()
 	s.nameLabel.Refresh()
-	s.Refresh()
 }
 
 // SetProgress 진행률 설정
@@ -258,8 +256,6 @@ func (s *StepItem) SetProgress(progress float64) {
 
 	if s.status == state.StepRunning && progress > 0 && progress < 1 {
 		s.icon.Text = fmt.Sprintf("%.0f%%", progress*100)
+		s.icon.Refresh()
 	}
-
-	s.icon.Refresh()
-	s.Refresh()
 }

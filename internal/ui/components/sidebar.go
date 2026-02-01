@@ -106,13 +106,13 @@ func NewSidebar() *Sidebar {
 	)
 
 	s.container = container.NewVBox(
+		s.settingsBtn,
+		widget.NewSeparator(),
 		channelSection,
 		widget.NewSeparator(),
 		queueSection,
 		widget.NewSeparator(),
 		historySection,
-		widget.NewSeparator(),
-		s.settingsBtn,
 	)
 
 	s.ExtendBaseWidget(s)
@@ -149,9 +149,13 @@ func (s *Sidebar) SetOnSettingsClick(callback func()) {
 // UpdateChannel 채널 상태 업데이트
 func (s *Sidebar) UpdateChannel(index int, status string, count int) {
 	if index >= 0 && index < len(s.channelData) {
-		s.channelData[index].Status = status
-		s.channelData[index].Count = count
-		s.channelList.Refresh()
+		// 변경이 있을 때만 Refresh
+		ch := &s.channelData[index]
+		if ch.Status != status || ch.Count != count {
+			ch.Status = status
+			ch.Count = count
+			s.channelList.RefreshItem(index)
+		}
 	}
 }
 

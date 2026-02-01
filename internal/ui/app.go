@@ -47,7 +47,7 @@ func NewApp(cfg *config.Config) *App {
 	// Create adapters
 	jiraClient := adapter.NewJiraClient(cfg.Jira.URL, cfg.Jira.Email, cfg.Jira.APIKey)
 	docGenerator := adapter.NewMarkdownGenerator(cfg.AI.PromptTemplate)
-	claudeAdapter := adapter.NewClaudeCodeAdapter(cfg.Claude.CLIPath, cfg.Claude.Enabled)
+	claudeAdapter := adapter.NewClaudeCodeAdapter(cfg.Claude.CLIPath, cfg.Claude.Enabled, cfg.Claude.Model)
 	videoProcessor := adapter.NewFFmpegVideoProcessor()
 	downloader := adapter.NewAttachmentDownloader(jiraClient, cfg.Output.Dir)
 
@@ -76,7 +76,7 @@ func NewApp(cfg *config.Config) *App {
 // Run starts the application
 func (a *App) Run() {
 	a.mainWindow = a.fyneApp.NewWindow("Jira AI Generator")
-	a.mainWindow.Resize(fyne.NewSize(1500, 1000))
+	a.mainWindow.Resize(fyne.NewSize(1920, 1080))
 	a.mainWindow.CenterOnScreen()
 
 	content := a.createMainContent()

@@ -26,6 +26,10 @@ type LogViewer struct {
 	collapsed  bool
 	maxLines   int
 
+	// 캐시
+	filteredCache      []LogViewerEntry
+	filteredCacheDirty bool
+
 	// UI 요소
 	filterSelect  *widget.Select
 	clearBtn      *widget.Button
@@ -45,11 +49,13 @@ type LogViewerEntry struct {
 // NewLogViewer 새 LogViewer 생성
 func NewLogViewer() *LogViewer {
 	lv := &LogViewer{
-		logs:       make([]LogViewerEntry, 0),
-		filter:     state.LogDebug, // 모든 로그 표시
-		autoScroll: true,
-		collapsed:  false,
-		maxLines:   500,
+		logs:               make([]LogViewerEntry, 0),
+		filter:             state.LogDebug, // 모든 로그 표시
+		autoScroll:         true,
+		collapsed:          false,
+		maxLines:           500,
+		filteredCache:      make([]LogViewerEntry, 0),
+		filteredCacheDirty: true,
 	}
 
 	// 필터 셀렉트
@@ -68,6 +74,7 @@ func NewLogViewer() *LogViewer {
 			default:
 				lv.filter = state.LogDebug
 			}
+			lv.invalidateCache()
 			if lv.list != nil {
 				lv.list.Refresh()
 			}
@@ -182,6 +189,7 @@ func (lv *LogViewer) AddLog(level state.LogLevel, message, source string) {
 		lv.logs = lv.logs[len(lv.logs)-lv.maxLines:]
 	}
 
+	lv.invalidateCache()
 	lv.updateCountLabel()
 	lv.list.Refresh()
 
@@ -201,7 +209,8 @@ func (lv *LogViewer) AddLogEntry(entry state.LogEntry) {
 
 // Clear 로그 초기화
 func (lv *LogViewer) Clear() {
-	lv.logs = make([]LogViewerEntry, 0)
+	lv.logs = lv.logs[:0]
+	lv.invalidateCache()
 	lv.updateCountLabel()
 	lv.list.Refresh()
 }
@@ -243,19 +252,31 @@ func (lv *LogViewer) SetAutoScroll(enabled bool) {
 	lv.autoScrollChk.SetChecked(enabled)
 }
 
-// getFilteredLogs 필터링된 로그 조회
+// getFilteredLogs 필터링된 로그 조회 (캐시 사용)
 func (lv *LogViewer) getFilteredLogs() []LogViewerEntry {
 	if lv.filter == state.LogDebug {
 		return lv.logs
 	}
 
-	filtered := make([]LogViewerEntry, 0)
+	// 캐시가 유효하면 반환
+	if !lv.filteredCacheDirty {
+		return lv.filteredCache
+	}
+
+	// 캐시 재구성
+	lv.filteredCache = lv.filteredCache[:0] // 재사용
 	for _, log := range lv.logs {
 		if log.Level >= lv.filter {
-			filtered = append(filtered, log)
+			lv.filteredCache = append(lv.filteredCache, log)
 		}
 	}
-	return filtered
+	lv.filteredCacheDirty = false
+	return lv.filteredCache
+}
+
+// invalidateCache 캐시 무효화
+func (lv *LogViewer) invalidateCache() {
+	lv.filteredCacheDirty = true
 }
 
 // updateCountLabel 개수 라벨 업데이트
