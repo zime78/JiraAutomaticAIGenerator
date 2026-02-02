@@ -1,5 +1,9 @@
 package ui
 
+// Deprecated: This file contains V1 UI code.
+// Use app_ui_v2.go instead.
+// This file will be removed in the next major version.
+
 import (
 	"fmt"
 

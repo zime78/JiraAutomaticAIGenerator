@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"jira-ai-generator/internal/domain"
+	"jira-ai-generator/internal/port"
 )
 
 // AppState 전체 애플리케이션 상태 관리
@@ -22,8 +23,12 @@ type AppState struct {
 	// 이벤트 버스
 	EventBus *EventBus
 
-	// 완료된 작업 이력
+	// 완료된 작업 이력 (메모리 캐시)
 	CompletedJobs []*JobData
+
+	// Database stores (영속성 레이어)
+	IssueStore    port.IssueStore
+	AnalysisStore port.AnalysisResultStore
 }
 
 // ChannelStateData 채널별 상태 데이터 (UI 위젯 참조 제외)
@@ -149,7 +154,7 @@ type LogEntry struct {
 }
 
 // NewAppState 새 AppState 생성
-func NewAppState() *AppState {
+func NewAppState(issueStore port.IssueStore, analysisStore port.AnalysisResultStore) *AppState {
 	state := &AppState{
 		Channels: [3]*ChannelStateData{
 			NewChannelStateData(0, "채널 1"),
@@ -160,6 +165,14 @@ func NewAppState() *AppState {
 		GlobalStatus:  "준비됨",
 		EventBus:      NewEventBus(),
 		CompletedJobs: make([]*JobData, 0),
+		IssueStore:    issueStore,
+		AnalysisStore: analysisStore,
+	}
+
+	// DB에서 기존 데이터 로드
+	if err := state.LoadFromDB(); err != nil {
+		// 로드 실패해도 앱은 시작 (로그만 남김)
+		state.AddLog(-1, LogError, "DB 로드 실패: "+err.Error(), "AppState")
 	}
 
 	return state
@@ -409,4 +422,130 @@ func (s *AppState) GetCompletedJobs() []*JobData {
 	result := make([]*JobData, len(s.CompletedJobs))
 	copy(result, s.CompletedJobs)
 	return result
+}
+
+// LoadFromDB DB에서 기존 데이터 로드
+func (s *AppState) LoadFromDB() error {
+	if s.IssueStore == nil {
+		return nil // DB가 설정되지 않은 경우 스킵
+	}
+
+	// 모든 이슈 로드
+	issues, err := s.IssueStore.ListAllIssues()
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// 완료된 작업 목록 재구성
+	s.CompletedJobs = make([]*JobData, 0, len(issues))
+
+	for _, issue := range issues {
+		job := &JobData{
+			ID:           issue.IssueKey,
+			IssueKey:     issue.IssueKey,
+			MDPath:       issue.MDPath,
+			ChannelIndex: issue.ChannelIndex,
+			StartTime:    issue.CreatedAt,
+			EndTime:      issue.UpdatedAt,
+			Status:       JobCompleted,
+		}
+
+		// Phase에 따라 상태 설정
+		switch issue.Phase {
+		case 1:
+			job.Phase = PhasePhase1Complete
+		case 2:
+			job.Phase = PhaseAIPlanReady
+		case 3:
+			job.Phase = PhaseCompleted
+		default:
+			job.Phase = PhaseIdle
+		}
+
+		// 분석 결과 로드 (있는 경우)
+		if s.AnalysisStore != nil {
+			results, err := s.AnalysisStore.ListAnalysisResultsByIssue(issue.ID)
+			if err == nil && len(results) > 0 {
+				for _, result := range results {
+					if result.PlanPath != "" {
+						job.PlanPath = result.PlanPath
+					}
+					if result.ExecutionPath != "" {
+						job.ExecutionPath = result.ExecutionPath
+					}
+					if result.ResultPath != "" {
+						job.AnalysisPath = result.ResultPath
+					}
+				}
+			}
+		}
+
+		s.CompletedJobs = append(s.CompletedJobs, job)
+	}
+
+	return nil
+}
+
+// SaveIssueToDBAfterPhase1 1차 분석 완료 후 DB에 저장
+func (s *AppState) SaveIssueToDBAfterPhase1(channelIndex int, issueKey, summary, description, jiraURL, mdPath string) error {
+	if s.IssueStore == nil {
+		return nil // DB가 없으면 스킵
+	}
+
+	issue := &domain.IssueRecord{
+		IssueKey:     issueKey,
+		Summary:      summary,
+		Description:  description,
+		JiraURL:      jiraURL,
+		MDPath:       mdPath,
+		Phase:        1, // 1차 완료
+		Status:       "active",
+		ChannelIndex: channelIndex,
+	}
+
+	return s.IssueStore.CreateIssue(issue)
+}
+
+// UpdateIssuePhase 이슈 단계 업데이트
+func (s *AppState) UpdateIssuePhase(issueKey string, phase int) error {
+	if s.IssueStore == nil {
+		return nil
+	}
+
+	issue, err := s.IssueStore.GetIssue(issueKey)
+	if err != nil {
+		return err
+	}
+
+	issue.Phase = phase
+	return s.IssueStore.UpdateIssue(issue)
+}
+
+// SaveAnalysisResult 분석 결과 저장
+func (s *AppState) SaveAnalysisResult(issueKey string, analysisPhase int, planPath, executionPath, resultPath string, status string) error {
+	if s.IssueStore == nil || s.AnalysisStore == nil {
+		return nil
+	}
+
+	// 이슈 ID 조회
+	issue, err := s.IssueStore.GetIssue(issueKey)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now()
+	result := &domain.AnalysisResult{
+		IssueID:       issue.ID,
+		AnalysisPhase: analysisPhase,
+		PlanPath:      planPath,
+		ExecutionPath: executionPath,
+		ResultPath:    resultPath,
+		Status:        status,
+		CompletedAt:   &now,
+	}
+
+	return s.AnalysisStore.CreateAnalysisResult(result)
 }

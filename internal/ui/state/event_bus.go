@@ -3,6 +3,8 @@ package state
 import (
 	"sync"
 	"time"
+
+	"jira-ai-generator/internal/logger"
 )
 
 // EventType 이벤트 유형 정의
@@ -23,6 +25,14 @@ const (
 	EventChannelSwitch EventType = "channel.switch"
 	EventQueueUpdated  EventType = "queue.updated"
 	EventHistoryAdded  EventType = "history.added"
+
+	// 신규 이벤트 타입
+	EventSidebarAction    EventType = "sidebar.action"       // Sidebar에서 액션 발생
+	EventPhase1Complete   EventType = "phase1.complete"      // 1차 분석 완료
+	EventPhase2Complete   EventType = "phase2.complete"      // 2차 분석 완료 (Plan 준비됨)
+	EventPhase3Complete   EventType = "phase3.complete"      // 3차 분석 완료 (실행 완료)
+	EventDBSync           EventType = "db.sync"              // DB 동기화 완료
+	EventIssueListRefresh EventType = "issue.list.refresh"   // 이슈 목록 갱신 필요
 )
 
 // ProcessPhase 처리 단계 정의
@@ -34,7 +44,11 @@ const (
 	PhaseDownloadingAttachments
 	PhaseExtractingFrames
 	PhaseGeneratingDocument
-	PhaseAnalyzing
+	PhasePhase1Complete   // 1차 완료 (MD 생성됨)
+	PhaseAIPlanGeneration // 2차: AI Plan 생성 중
+	PhaseAIPlanReady      // 2차 완료: Plan 준비됨
+	PhaseAIExecution      // 3차: Plan 실행 중
+	PhaseAnalyzing        // 기존 유지 (하위 호환)
 	PhaseCompleted
 	PhaseFailed
 )
@@ -52,6 +66,14 @@ func (p ProcessPhase) String() string {
 		return "프레임 추출"
 	case PhaseGeneratingDocument:
 		return "문서 생성"
+	case PhasePhase1Complete:
+		return "1차 분석 완료"
+	case PhaseAIPlanGeneration:
+		return "AI 플랜 생성 중"
+	case PhaseAIPlanReady:
+		return "AI 플랜 준비됨"
+	case PhaseAIExecution:
+		return "AI 플랜 실행 중"
 	case PhaseAnalyzing:
 		return "AI 분석"
 	case PhaseCompleted:
@@ -75,7 +97,15 @@ func (p ProcessPhase) Progress() float64 {
 	case PhaseExtractingFrames:
 		return 0.5
 	case PhaseGeneratingDocument:
+		return 0.6
+	case PhasePhase1Complete:
+		return 0.65
+	case PhaseAIPlanGeneration:
 		return 0.7
+	case PhaseAIPlanReady:
+		return 0.75
+	case PhaseAIExecution:
+		return 0.85
 	case PhaseAnalyzing:
 		return 0.8
 	case PhaseCompleted:
@@ -179,6 +209,8 @@ func (eb *EventBus) Publish(event Event) {
 		event.Timestamp = time.Now()
 	}
 
+	logger.Debug("Publish: type=%s, channel=%d, handler_count=%d", event.Type, event.Channel, len(handlers))
+
 	// 모든 핸들러에게 이벤트 전달 (비동기)
 	for _, handler := range handlers {
 		go handler(event)
@@ -194,6 +226,8 @@ func (eb *EventBus) PublishSync(event Event) {
 	if event.Timestamp.IsZero() {
 		event.Timestamp = time.Now()
 	}
+
+	logger.Debug("PublishSync: type=%s, channel=%d, handler_count=%d", event.Type, event.Channel, len(handlers))
 
 	for _, handler := range handlers {
 		handler(event)

@@ -9,6 +9,9 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+
+	"jira-ai-generator/internal/logger"
+	"jira-ai-generator/internal/ui/state"
 )
 
 // Sidebar 사이드바 컴포넌트
@@ -16,6 +19,12 @@ type Sidebar struct {
 	widget.BaseWidget
 
 	container *fyne.Container
+
+	// 1차 분석 UI
+	urlEntry   *widget.Entry
+	analyzeBtn *widget.Button
+	eventBus   *state.EventBus
+	channelIdx int
 
 	// 채널 목록
 	channelList   *widget.List
@@ -47,8 +56,11 @@ type ChannelInfo struct {
 }
 
 // NewSidebar 새 Sidebar 생성
-func NewSidebar() *Sidebar {
+func NewSidebar(eventBus *state.EventBus, channelIdx int) *Sidebar {
 	s := &Sidebar{
+		eventBus:   eventBus,
+		channelIdx: channelIdx,
+		urlEntry:   widget.NewEntry(),
 		channelData: []ChannelInfo{
 			{Index: 0, Name: "채널 1", Status: "대기", Count: 0},
 			{Index: 1, Name: "채널 2", Status: "대기", Count: 0},
@@ -59,6 +71,12 @@ func NewSidebar() *Sidebar {
 		historyPanel:  NewHistoryPanel(),
 		settingsBtn:   widget.NewButton("⚙️ 설정", nil),
 	}
+
+	// URL 입력 필드 설정
+	s.urlEntry.SetPlaceHolder("Jira URL 입력...")
+
+	// 분석 시작 버튼 생성
+	s.analyzeBtn = widget.NewButton("분석 시작", s.onAnalyzeClick)
 
 	s.settingsBtn.OnTapped = func() {
 		if s.onSettingsClick != nil {
@@ -84,12 +102,29 @@ func NewSidebar() *Sidebar {
 	s.channelList.OnSelected = func(id widget.ListItemID) {
 		s.activeChannel = id
 		s.channelList.Refresh()
+		logger.Debug("OnSelected: channel changed to %d", id)
 		if s.onChannelSelect != nil {
 			s.onChannelSelect(id)
 		}
+
+		// 채널 변경 시 해당 채널의 완료 목록 로드 이벤트 발행
+		s.eventBus.Publish(state.Event{
+			Type:    state.EventIssueListRefresh,
+			Channel: id,
+			Data: map[string]interface{}{
+				"action": "load_completed",
+			},
+		})
 	}
 
 	// 컨테이너 구성
+	// 1차 분석 섹션
+	analyzeSection := container.NewVBox(
+		widget.NewLabelWithStyle("🔍 1차 분석", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		s.urlEntry,
+		s.analyzeBtn,
+	)
+
 	channelSection := container.NewVBox(
 		widget.NewLabelWithStyle("채널", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		container.NewVBox(s.channelList),
@@ -108,6 +143,8 @@ func NewSidebar() *Sidebar {
 	s.container = container.NewVBox(
 		s.settingsBtn,
 		widget.NewSeparator(),
+		analyzeSection,
+		widget.NewSeparator(),
 		channelSection,
 		widget.NewSeparator(),
 		queueSection,
@@ -116,12 +153,33 @@ func NewSidebar() *Sidebar {
 	)
 
 	s.ExtendBaseWidget(s)
+	logger.Debug("NewSidebar created for channel %d", channelIdx)
 	return s
 }
 
 // CreateRenderer Sidebar 렌더러
 func (s *Sidebar) CreateRenderer() fyne.WidgetRenderer {
 	return widget.NewSimpleRenderer(s.container)
+}
+
+// onAnalyzeClick 분석 시작 버튼 클릭 핸들러
+func (s *Sidebar) onAnalyzeClick() {
+	url := s.urlEntry.Text
+	if url == "" {
+		return
+	}
+
+	logger.Debug("onAnalyzeClick: url=%s, channel=%d", url, s.channelIdx)
+
+	// EventSidebarAction 발행
+	s.eventBus.Publish(state.Event{
+		Type:    state.EventSidebarAction,
+		Channel: s.channelIdx,
+		Data: map[string]interface{}{
+			"action": "analyze",
+			"url":    url,
+		},
+	})
 }
 
 // SetOnChannelSelect 채널 선택 콜백 설정
@@ -148,15 +206,17 @@ func (s *Sidebar) SetOnSettingsClick(callback func()) {
 
 // UpdateChannel 채널 상태 업데이트
 func (s *Sidebar) UpdateChannel(index int, status string, count int) {
-	if index >= 0 && index < len(s.channelData) {
-		// 변경이 있을 때만 Refresh
-		ch := &s.channelData[index]
-		if ch.Status != status || ch.Count != count {
-			ch.Status = status
-			ch.Count = count
-			s.channelList.RefreshItem(index)
+	fyne.Do(func() {
+		if index >= 0 && index < len(s.channelData) {
+			// 변경이 있을 때만 Refresh
+			ch := &s.channelData[index]
+			if ch.Status != status || ch.Count != count {
+				ch.Status = status
+				ch.Count = count
+				s.channelList.RefreshItem(index)
+			}
 		}
-	}
+	})
 }
 
 // SetActiveChannel 활성 채널 설정
@@ -184,7 +244,9 @@ func (s *Sidebar) ClearQueue() {
 
 // AddHistoryItem 이력에 항목 추가
 func (s *Sidebar) AddHistoryItem(id, issueKey, status, duration string) {
-	s.historyPanel.AddItem(id, issueKey, status, duration)
+	fyne.Do(func() {
+		s.historyPanel.AddItem(id, issueKey, status, duration)
+	})
 }
 
 // ChannelItem 채널 목록 아이템

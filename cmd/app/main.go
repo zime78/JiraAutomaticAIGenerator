@@ -25,7 +25,12 @@ func main() {
 	}
 
 	// Create and run application
-	app := ui.NewApp(cfg)
+	app, err := ui.NewApp(cfg)
+	if err != nil {
+		log.Fatalf("앱 초기화 실패: %v", err)
+	}
+	defer app.Close()
+
 	if app.UseV2UI() {
 		app.RunV2()
 	} else {

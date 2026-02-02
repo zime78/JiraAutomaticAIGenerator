@@ -7,7 +7,7 @@ import (
 )
 
 func TestNewAppState(t *testing.T) {
-	state := NewAppState()
+	state := NewAppState(nil, nil)
 
 	if state == nil {
 		t.Fatal("NewAppState returned nil")
@@ -44,7 +44,7 @@ func TestNewChannelStateData(t *testing.T) {
 }
 
 func TestAppState_GetChannel(t *testing.T) {
-	state := NewAppState()
+	state := NewAppState(nil, nil)
 
 	ch := state.GetChannel(1)
 	if ch == nil {
@@ -64,7 +64,7 @@ func TestAppState_GetChannel(t *testing.T) {
 }
 
 func TestAppState_SetActiveChannel(t *testing.T) {
-	state := NewAppState()
+	state := NewAppState(nil, nil)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -88,7 +88,7 @@ func TestAppState_SetActiveChannel(t *testing.T) {
 }
 
 func TestAppState_UpdatePhase(t *testing.T) {
-	state := NewAppState()
+	state := NewAppState(nil, nil)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -125,7 +125,7 @@ func TestAppState_UpdatePhase(t *testing.T) {
 }
 
 func TestAppState_UpdateProgress(t *testing.T) {
-	state := NewAppState()
+	state := NewAppState(nil, nil)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -149,7 +149,7 @@ func TestAppState_UpdateProgress(t *testing.T) {
 }
 
 func TestAppState_AddLog(t *testing.T) {
-	state := NewAppState()
+	state := NewAppState(nil, nil)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -172,7 +172,7 @@ func TestAppState_AddLog(t *testing.T) {
 }
 
 func TestAppState_AddJob(t *testing.T) {
-	state := NewAppState()
+	state := NewAppState(nil, nil)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -199,7 +199,7 @@ func TestAppState_AddJob(t *testing.T) {
 }
 
 func TestAppState_CompleteJob(t *testing.T) {
-	state := NewAppState()
+	state := NewAppState(nil, nil)
 
 	// 현재 작업 설정
 	state.Channels[0].CurrentJob = &JobData{
@@ -236,7 +236,7 @@ func TestAppState_CompleteJob(t *testing.T) {
 }
 
 func TestAppState_FailJob(t *testing.T) {
-	state := NewAppState()
+	state := NewAppState(nil, nil)
 
 	// 현재 작업 설정
 	state.Channels[0].CurrentJob = &JobData{
@@ -276,7 +276,7 @@ func TestAppState_FailJob(t *testing.T) {
 }
 
 func TestAppState_ResetChannel(t *testing.T) {
-	state := NewAppState()
+	state := NewAppState(nil, nil)
 
 	// 상태 변경
 	ch := state.GetChannel(0)
@@ -300,7 +300,7 @@ func TestAppState_ResetChannel(t *testing.T) {
 }
 
 func TestAppState_ConcurrentAccess(t *testing.T) {
-	state := NewAppState()
+	state := NewAppState(nil, nil)
 
 	var wg sync.WaitGroup
 

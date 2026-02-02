@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"jira-ai-generator/internal/domain"
+	"jira-ai-generator/internal/logger"
 )
 
 // JiraClient implements port.JiraRepository
@@ -50,15 +51,19 @@ type issueResponse struct {
 
 // GetIssue fetches a Jira issue by its key
 func (c *JiraClient) GetIssue(issueKey string) (*domain.JiraIssue, error) {
+	logger.Debug("GetIssue: issueKey=%s, baseURL=%s", issueKey, c.baseURL)
 	url := fmt.Sprintf("%s/rest/api/3/issue/%s", c.baseURL, issueKey)
+	logger.Debug("GetIssue: requesting URL=%s", url)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
+		logger.Debug("GetIssue: failed to create request: %v", err)
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	c.setAuthHeader(req)
 	req.Header.Set("Accept", "application/json")
+	logger.Debug("GetIssue: auth header set for email=%s", c.email)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

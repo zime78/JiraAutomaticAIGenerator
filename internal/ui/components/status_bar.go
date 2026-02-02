@@ -95,23 +95,27 @@ func (sb *StatusBar) CreateRenderer() fyne.WidgetRenderer {
 
 // SetGlobalStatus 글로벌 상태 설정
 func (sb *StatusBar) SetGlobalStatus(status string, isError bool) {
-	sb.globalStatus.SetText(status)
+	fyne.Do(func() {
+		sb.globalStatus.SetText(status)
 
-	if isError {
-		sb.globalIcon.Text = "●"
-		sb.globalIcon.Color = color.RGBA{R: 239, G: 68, B: 68, A: 255} // 빨간색
-	} else {
-		sb.globalIcon.Text = "●"
-		sb.globalIcon.Color = color.RGBA{R: 34, G: 197, B: 94, A: 255} // 녹색
-	}
-	sb.globalIcon.Refresh()
+		if isError {
+			sb.globalIcon.Text = "●"
+			sb.globalIcon.Color = color.RGBA{R: 239, G: 68, B: 68, A: 255} // 빨간색
+		} else {
+			sb.globalIcon.Text = "●"
+			sb.globalIcon.Color = color.RGBA{R: 34, G: 197, B: 94, A: 255} // 녹색
+		}
+		sb.globalIcon.Refresh()
+	})
 }
 
 // SetChannelStatus 채널 상태 설정
 func (sb *StatusBar) SetChannelStatus(channelIndex int, phase state.ProcessPhase) {
-	if channelIndex >= 0 && channelIndex < 3 {
-		sb.channelIndicators[channelIndex].SetStatus(phase)
-	}
+	fyne.Do(func() {
+		if channelIndex >= 0 && channelIndex < 3 {
+			sb.channelIndicators[channelIndex].SetStatus(phase)
+		}
+	})
 }
 
 // SetRecentActivity 최근 활동 설정

@@ -39,3 +39,30 @@ type Clipboard interface {
 	// SetContent sets the clipboard content
 	SetContent(content string)
 }
+
+// IssueStore defines the interface for persisting issue records
+type IssueStore interface {
+	CreateIssue(issue *domain.IssueRecord) error
+	GetIssue(issueKey string) (*domain.IssueRecord, error)
+	UpdateIssue(issue *domain.IssueRecord) error
+	DeleteIssue(issueKey string) error
+	ListIssuesByPhase(phase int) ([]*domain.IssueRecord, error)
+	ListIssuesByChannel(channelIndex int) ([]*domain.IssueRecord, error)
+	ListIssuesByChannelAndPhase(channelIndex, phase int) ([]*domain.IssueRecord, error)
+	ListAllIssues() ([]*domain.IssueRecord, error)
+}
+
+// AnalysisResultStore defines the interface for persisting analysis results
+type AnalysisResultStore interface {
+	CreateAnalysisResult(result *domain.AnalysisResult) error
+	GetAnalysisResult(issueID int64, phase int) (*domain.AnalysisResult, error)
+	UpdateAnalysisResult(result *domain.AnalysisResult) error
+	ListAnalysisResultsByIssue(issueID int64) ([]*domain.AnalysisResult, error)
+}
+
+// AttachmentStore defines the interface for persisting attachment records
+type AttachmentStore interface {
+	CreateAttachment(attachment *domain.AttachmentRecord) error
+	ListAttachmentsByIssue(issueID int64) ([]*domain.AttachmentRecord, error)
+	DeleteAttachmentsByIssue(issueID int64) error
+}

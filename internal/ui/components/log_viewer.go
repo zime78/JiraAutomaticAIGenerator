@@ -190,16 +190,19 @@ func (lv *LogViewer) AddLog(level state.LogLevel, message, source string) {
 	}
 
 	lv.invalidateCache()
-	lv.updateCountLabel()
-	lv.list.Refresh()
 
-	// 자동 스크롤
-	if lv.autoScroll {
-		filteredLogs := lv.getFilteredLogs()
-		if len(filteredLogs) > 0 {
-			lv.list.ScrollToBottom()
+	fyne.Do(func() {
+		lv.updateCountLabel()
+		lv.list.Refresh()
+
+		// 자동 스크롤
+		if lv.autoScroll {
+			filteredLogs := lv.getFilteredLogs()
+			if len(filteredLogs) > 0 {
+				lv.list.ScrollToBottom()
+			}
 		}
-	}
+	})
 }
 
 // AddLogEntry LogEntry로 로그 추가

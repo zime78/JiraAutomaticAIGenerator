@@ -15,6 +15,9 @@ elif [ -f "/Library/Fonts/Arial Unicode.ttf" ]; then
     export FYNE_FONT="/Library/Fonts/Arial Unicode.ttf"
 fi
 
-echo "🚀 개발 모드로 실행 중..."
+# 디버그 모드 활성화
+export DEBUG=1
+
+echo "🚀 개발 모드로 실행 중... (DEBUG=$DEBUG)"
 echo "   FYNE_FONT: ${FYNE_FONT:-기본값}"
 go run ./cmd/app

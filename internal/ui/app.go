@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"fmt"
+	"path/filepath"
 	"sync"
 
 	"fyne.io/fyne/v2"
@@ -10,6 +12,7 @@ import (
 
 	"jira-ai-generator/internal/adapter"
 	"jira-ai-generator/internal/config"
+	"jira-ai-generator/internal/port"
 	"jira-ai-generator/internal/usecase"
 )
 
@@ -25,6 +28,12 @@ type App struct {
 	docGenerator   *adapter.MarkdownGenerator
 	claudeAdapter  *adapter.ClaudeCodeAdapter
 
+	// Database stores
+	issueStore      port.IssueStore
+	analysisStore   port.AnalysisResultStore
+	attachmentStore port.AttachmentStore
+	repository      *adapter.SQLiteRepository // For Close()
+
 	// UI components (글로벌)
 	statusLabel *widget.Label
 	stopAllBtn  *widget.Button
@@ -37,12 +46,22 @@ type App struct {
 	// Processing state
 	queues        [3]*AnalysisQueue
 	completedJobs []*AnalysisJob
+
+	// UI version control
+	useV2UI bool // V2 UI 사용 여부 (기본값: true, V1은 deprecated)
 }
 
 // NewApp creates a new application instance with dependency injection
-func NewApp(cfg *config.Config) *App {
+func NewApp(cfg *config.Config) (*App, error) {
 	fyneApp := app.New()
 	fyneApp.Settings().SetTheme(NewKoreanTheme())
+
+	// Initialize SQLite repository
+	dbPath := filepath.Join(cfg.Output.Dir, "jira.db")
+	repo, err := adapter.NewSQLiteRepository(dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to init DB: %w", err)
+	}
 
 	// Create adapters
 	jiraClient := adapter.NewJiraClient(cfg.Jira.URL, cfg.Jira.Email, cfg.Jira.APIKey)
@@ -55,11 +74,16 @@ func NewApp(cfg *config.Config) *App {
 	processIssueUC := usecase.NewProcessIssueUseCase(jiraClient, downloader, videoProcessor, docGenerator, cfg.Output.Dir)
 
 	return &App{
-		fyneApp:        fyneApp,
-		config:         cfg,
-		processIssueUC: processIssueUC,
-		docGenerator:   docGenerator,
-		claudeAdapter:  claudeAdapter,
+		fyneApp:         fyneApp,
+		config:          cfg,
+		processIssueUC:  processIssueUC,
+		docGenerator:    docGenerator,
+		claudeAdapter:   claudeAdapter,
+		issueStore:      repo,
+		analysisStore:   repo,
+		attachmentStore: repo,
+		repository:      repo,
+		useV2UI:         true, // V2 UI를 기본으로 활성화
 		channels: [3]*ChannelState{
 			{Index: 0, Name: "채널 1"},
 			{Index: 1, Name: "채널 2"},
@@ -70,20 +94,24 @@ func NewApp(cfg *config.Config) *App {
 			{Name: "채널 2", Pending: []*AnalysisJob{}},
 			{Name: "채널 3", Pending: []*AnalysisJob{}},
 		},
-	}
+	}, nil
+}
+
+// UseV2UI returns whether V2 UI is enabled
+func (a *App) UseV2UI() bool {
+	return a.useV2UI
 }
 
 // Run starts the application
 func (a *App) Run() {
-	a.mainWindow = a.fyneApp.NewWindow("Jira AI Generator")
-	a.mainWindow.Resize(fyne.NewSize(1920, 1080))
-	a.mainWindow.CenterOnScreen()
+	// V2 UI가 기본값이므로 항상 V2로 실행
+	a.RunV2()
+}
 
-	content := a.createMainContent()
-	a.mainWindow.SetContent(content)
-
-	// Load previous analysis results from output folder
-	a.loadPreviousAnalysis()
-
-	a.mainWindow.ShowAndRun()
+// Close closes the database connection
+func (a *App) Close() error {
+	if a.repository != nil {
+		return a.repository.Close()
+	}
+	return nil
 }

@@ -38,9 +38,42 @@ func NewProcessIssueUseCase(
 // ProgressCallback is called to report progress
 type ProgressCallback func(progress float64, status string)
 
+// extractIssueKeyFromURL extracts the issue key from a Jira URL or returns the input if already a key
+func extractIssueKeyFromURL(input string) string {
+	// If it's already just an issue key (e.g., "PROJ-123"), return as-is
+	if !strings.Contains(input, "/") {
+		return input
+	}
+
+	// Handle /browse/PROJ-123 format
+	if idx := strings.Index(input, "/browse/"); idx != -1 {
+		key := input[idx+8:]
+		// Remove query parameters if present
+		if qIdx := strings.Index(key, "?"); qIdx != -1 {
+			key = key[:qIdx]
+		}
+		return key
+	}
+
+	// Handle /issues/PROJ-123 format (software projects)
+	if idx := strings.Index(input, "/issues/"); idx != -1 {
+		key := input[idx+8:]
+		if qIdx := strings.Index(key, "?"); qIdx != -1 {
+			key = key[:qIdx]
+		}
+		return key
+	}
+
+	// Fallback: return input as-is
+	return input
+}
+
 // Execute processes a Jira issue and generates a document
-func (uc *ProcessIssueUseCase) Execute(issueKey string, onProgress ProgressCallback) (*domain.ProcessResult, error) {
+func (uc *ProcessIssueUseCase) Execute(issueKeyOrURL string, onProgress ProgressCallback) (*domain.ProcessResult, error) {
 	result := &domain.ProcessResult{}
+
+	// Extract issue key from URL if needed
+	issueKey := extractIssueKeyFromURL(issueKeyOrURL)
 
 	// Step 1: Fetch issue
 	onProgress(0.1, "Jira 이슈 조회 중...")

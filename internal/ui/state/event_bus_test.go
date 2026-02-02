@@ -223,7 +223,7 @@ func TestProcessPhase_Progress(t *testing.T) {
 		{PhaseFetchingIssue, 0.1},
 		{PhaseDownloadingAttachments, 0.3},
 		{PhaseExtractingFrames, 0.5},
-		{PhaseGeneratingDocument, 0.7},
+		{PhaseGeneratingDocument, 0.6},
 		{PhaseAnalyzing, 0.8},
 		{PhaseCompleted, 1.0},
 		{PhaseFailed, 0.0},

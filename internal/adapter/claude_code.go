@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"jira-ai-generator/internal/logger"
 )
 
 // AnalysisPhase는 분석 실행 단계를 나타냄
@@ -79,14 +81,20 @@ func resolveWorkDir(workDir string) (string, error) {
 
 // AnalyzeIssue launches Claude as a detached background process
 func (c *ClaudeCodeAdapter) AnalyzeIssue(mdFilePath, prompt, workDir string) (*AnalysisResult, error) {
+	defer logger.DebugFunc("AnalyzeIssue")()
+	logger.Debug("AnalyzeIssue: mdPath=%s, workDir=%s", mdFilePath, workDir)
+
 	if !c.enabled {
+		logger.Debug("AnalyzeIssue: Claude integration is not enabled")
 		return nil, fmt.Errorf("Claude integration is not enabled")
 	}
 
 	effectiveDir, err := resolveWorkDir(workDir)
 	if err != nil {
+		logger.Debug("AnalyzeIssue: resolveWorkDir failed: %v", err)
 		return nil, err
 	}
+	logger.Debug("AnalyzeIssue: effectiveDir=%s", effectiveDir)
 
 	fmt.Printf("[Claude] Starting analysis...\n")
 	fmt.Printf("[Claude] CLI Path: %s\n", c.cliPath)
@@ -177,6 +185,8 @@ echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Done!"
 	fmt.Printf("[Claude] Results will be saved to: %s\n", outputPath)
 	fmt.Printf("[Claude] Log file: %s\n", logFile)
 	fmt.Printf("[Claude] You can close this app - analysis will continue in background.\n")
+
+	logger.Debug("AnalyzeIssue: completed successfully, PID=%d, output=%s", cmd.Process.Pid, outputPath)
 
 	// Return the result with PID and paths
 	return &AnalysisResult{
@@ -320,14 +330,20 @@ func BuildAnalysisPlanPrompt(issueKey, mdPath string) string {
 // 기존 AnalyzeIssue와 유사하지만, 결과를 Jira 컨텍스트 + 분석 결과 + 실행 지시사항으로
 // 구조화된 plan 파일로 조립한다.
 func (c *ClaudeCodeAdapter) AnalyzeAndGeneratePlan(mdFilePath, prompt, workDir string) (*PlanResult, error) {
+	defer logger.DebugFunc("AnalyzeAndGeneratePlan")()
+	logger.Debug("AnalyzeAndGeneratePlan: mdPath=%s, workDir=%s", mdFilePath, workDir)
+
 	if !c.enabled {
+		logger.Debug("AnalyzeAndGeneratePlan: Claude integration is not enabled")
 		return nil, fmt.Errorf("Claude integration is not enabled")
 	}
 
 	effectiveDir, err := resolveWorkDir(workDir)
 	if err != nil {
+		logger.Debug("AnalyzeAndGeneratePlan: resolveWorkDir failed: %v", err)
 		return nil, err
 	}
+	logger.Debug("AnalyzeAndGeneratePlan: effectiveDir=%s", effectiveDir)
 
 	fmt.Printf("[Claude] Phase 1: 분석 및 계획 생성 시작...\n")
 	fmt.Printf("[Claude] CLI Path: %s\n", c.cliPath)
@@ -401,7 +417,8 @@ if [ $CLAUDE_EXIT -ne 0 ]; then
     echo "⚠️ Claude 분석 중 오류 발생 (exit code: $CLAUDE_EXIT)" >> "%s"
     echo "" >> "%s"
 fi
-cat /tmp/claude_plan_$$.txt >> "%s"
+# bkit Feature Usage 섹션 제거 (─────로 시작하는 블록)
+sed '/^─\{5,\}/,/^─\{5,\}$/d' /tmp/claude_plan_$$.txt >> "%s"
 echo "" >> "%s"
 echo "---" >> "%s"
 echo "" >> "%s"
@@ -461,6 +478,8 @@ echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Phase 1 완료!"
 	fmt.Printf("[Claude] Plan 파일: %s\n", planPath)
 	fmt.Printf("[Claude] 로그 파일: %s\n", logFile)
 
+	logger.Debug("AnalyzeAndGeneratePlan: completed successfully, PID=%d, planPath=%s", cmd.Process.Pid, planPath)
+
 	return &PlanResult{
 		PlanPath:   planPath,
 		ScriptPath: scriptPath,
@@ -471,14 +490,20 @@ echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Phase 1 완료!"
 
 // ExecutePlan은 Phase 2: plan 파일을 Claude Code에 전달하여 실제 코드 수정을 실행한다.
 func (c *ClaudeCodeAdapter) ExecutePlan(planPath, workDir string) (*AnalysisResult, error) {
+	defer logger.DebugFunc("ExecutePlan")()
+	logger.Debug("ExecutePlan: planPath=%s, workDir=%s", planPath, workDir)
+
 	if !c.enabled {
+		logger.Debug("ExecutePlan: Claude integration is not enabled")
 		return nil, fmt.Errorf("Claude integration is not enabled")
 	}
 
 	effectiveDir, err := resolveWorkDir(workDir)
 	if err != nil {
+		logger.Debug("ExecutePlan: resolveWorkDir failed: %v", err)
 		return nil, err
 	}
+	logger.Debug("ExecutePlan: effectiveDir=%s", effectiveDir)
 
 	fmt.Printf("[Claude] Phase 2: 계획 실행 시작...\n")
 	fmt.Printf("[Claude] Plan File: %s\n", planPath)
@@ -570,6 +595,8 @@ echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Phase 2 완료!"
 
 	fmt.Printf("[Claude] Phase 2 시작됨 (PID: %d)\n", cmd.Process.Pid)
 	fmt.Printf("[Claude] 실행 결과: %s\n", executionPath)
+
+	logger.Debug("ExecutePlan: completed successfully, PID=%d, executionPath=%s", cmd.Process.Pid, executionPath)
 
 	return &AnalysisResult{
 		OutputPath: executionPath,

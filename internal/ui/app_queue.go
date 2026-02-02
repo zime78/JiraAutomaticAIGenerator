@@ -14,6 +14,7 @@ import (
 
 	"jira-ai-generator/internal/adapter"
 	"jira-ai-generator/internal/domain"
+	"jira-ai-generator/internal/ui/state"
 )
 
 // ChannelState는 각 채널의 독립적인 UI 및 상태를 관리한다.
@@ -370,4 +371,16 @@ func extractIssueKeyFromPath(path string) string {
 	base = strings.TrimSuffix(base, "_analysis.md")
 	base = strings.TrimSuffix(base, ".md")
 	return base
+}
+
+// mapAdapterPhaseToStatePhase converts adapter.AnalysisPhase to state.ProcessPhase
+func mapAdapterPhaseToStatePhase(adapterPhase adapter.AnalysisPhase) state.ProcessPhase {
+	switch adapterPhase {
+	case adapter.PhaseAnalyze:
+		return state.PhaseAnalyzing
+	case adapter.PhaseExecute:
+		return state.PhaseAIExecution
+	default:
+		return state.PhaseIdle
+	}
 }

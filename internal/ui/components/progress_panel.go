@@ -68,8 +68,8 @@ func NewProgressPanel() *ProgressPanel {
 	p.progressBar.Min = 0
 	p.progressBar.Max = 1
 
-	// 메시지 라벨 스타일
-	p.messageLabel.Wrapping = fyne.TextWrapWord
+	// 메시지 라벨 스타일 - Wrapping 제거하여 세로 줄바꿈 방지
+	p.messageLabel.Wrapping = fyne.TextTruncate
 
 	// 전체 컨테이너 구성
 	header := container.NewVBox(
@@ -77,13 +77,17 @@ func NewProgressPanel() *ProgressPanel {
 		widget.NewSeparator(),
 	)
 
+	// Border 레이아웃으로 messageLabel이 남은 공간을 차지하도록 함
+	statusRow := container.NewBorder(
+		nil, nil,
+		container.NewHBox(p.statusLabel, widget.NewLabel(" | ")), // 왼쪽 고정
+		nil,
+		p.messageLabel, // 중앙 - 남은 공간 차지
+	)
+
 	progressSection := container.NewVBox(
 		p.progressBar,
-		container.NewHBox(
-			p.statusLabel,
-			widget.NewLabel(" | "),
-			p.messageLabel,
-		),
+		statusRow,
 	)
 
 	p.container = container.NewVBox(
@@ -109,38 +113,42 @@ func (p *ProgressPanel) SetPhase(phase state.ProcessPhase) {
 		return
 	}
 
-	p.currentPhase = phase
-	p.progress = phase.Progress()
-	p.progressBar.SetValue(p.progress)
-	p.statusLabel.SetText(phase.String())
+	fyne.Do(func() {
+		p.currentPhase = phase
+		p.progress = phase.Progress()
+		p.progressBar.SetValue(p.progress)
+		p.statusLabel.SetText(phase.String())
 
-	// 단계별 상태 업데이트
-	phaseIndex := int(phase) - 1 // PhaseIdle은 0이므로 -1
+		// 단계별 상태 업데이트
+		phaseIndex := int(phase) - 1 // PhaseIdle은 0이므로 -1
 
-	for i, item := range p.stepItems {
-		if i < phaseIndex {
-			item.SetStatus(state.StepCompleted)
-		} else if i == phaseIndex {
-			item.SetStatus(state.StepRunning)
-		} else {
-			item.SetStatus(state.StepPending)
+		for i, item := range p.stepItems {
+			if i < phaseIndex {
+				item.SetStatus(state.StepCompleted)
+			} else if i == phaseIndex {
+				item.SetStatus(state.StepRunning)
+			} else {
+				item.SetStatus(state.StepPending)
+			}
 		}
-	}
+	})
 }
 
 // SetProgress 진행률 설정
 func (p *ProgressPanel) SetProgress(progress float64, message string) {
-	p.progress = progress
-	p.progressBar.SetValue(progress)
-	p.messageLabel.SetText(message)
+	fyne.Do(func() {
+		p.progress = progress
+		p.progressBar.SetValue(progress)
+		p.messageLabel.SetText(message)
 
-	// 현재 진행 중인 단계의 진행률 업데이트
-	for _, item := range p.stepItems {
-		if item.status == state.StepRunning {
-			item.SetProgress(progress)
-			break
+		// 현재 진행 중인 단계의 진행률 업데이트
+		for _, item := range p.stepItems {
+			if item.status == state.StepRunning {
+				item.SetProgress(progress)
+				break
+			}
 		}
-	}
+	})
 }
 
 // SetStepProgress 특정 단계의 진행률 설정
@@ -167,29 +175,33 @@ func (p *ProgressPanel) Reset() {
 
 // SetError 에러 상태 표시
 func (p *ProgressPanel) SetError(errMsg string) {
-	p.statusLabel.SetText("❌ 오류 발생")
-	p.messageLabel.SetText(errMsg)
+	fyne.Do(func() {
+		p.statusLabel.SetText("❌ 오류 발생")
+		p.messageLabel.SetText(errMsg)
 
-	// 현재 진행 중인 단계를 실패로 표시
-	for _, item := range p.stepItems {
-		if item.status == state.StepRunning {
-			item.SetStatus(state.StepFailed)
-			break
+		// 현재 진행 중인 단계를 실패로 표시
+		for _, item := range p.stepItems {
+			if item.status == state.StepRunning {
+				item.SetStatus(state.StepFailed)
+				break
+			}
 		}
-	}
+	})
 }
 
 // SetComplete 완료 상태 표시
 func (p *ProgressPanel) SetComplete() {
-	p.currentPhase = state.PhaseCompleted
-	p.progress = 1.0
-	p.progressBar.SetValue(1.0)
-	p.statusLabel.SetText("✅ 완료")
-	p.messageLabel.SetText("")
+	fyne.Do(func() {
+		p.currentPhase = state.PhaseCompleted
+		p.progress = 1.0
+		p.progressBar.SetValue(1.0)
+		p.statusLabel.SetText("✅ 완료")
+		p.messageLabel.SetText("")
 
-	for _, item := range p.stepItems {
-		item.SetStatus(state.StepCompleted)
-	}
+		for _, item := range p.stepItems {
+			item.SetStatus(state.StepCompleted)
+		}
+	})
 }
 
 // NewStepItem 새 StepItem 생성
