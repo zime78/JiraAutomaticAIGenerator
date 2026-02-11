@@ -14,6 +14,91 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
+// queueListItemView는 큐 목록 한 줄에 표시할 아이콘/텍스트를 표현한다.
+type queueListItemView struct {
+	Icon string
+	Text string
+}
+
+// queueListItemCount는 큐 목록에 표시할 전체 아이템 수를 반환한다.
+func queueListItemCount(q *AnalysisQueue) int {
+	if q == nil {
+		return 0
+	}
+
+	count := len(q.Pending) + len(q.Completed) + len(q.Failed) + len(q.Cancelled)
+	if q.Current != nil {
+		count++
+	}
+	return count
+}
+
+// resolveQueueListItemView는 인덱스에 해당하는 큐 아이템의 표시 정보를 계산한다.
+// 표시 순서는 Current -> Pending -> Completed -> Failed -> Cancelled 이다.
+func resolveQueueListItemView(q *AnalysisQueue, id int) (queueListItemView, bool) {
+	if q == nil || id < 0 {
+		return queueListItemView{}, false
+	}
+
+	currentCount := 0
+	if q.Current != nil {
+		currentCount = 1
+	}
+
+	if id == 0 && q.Current != nil {
+		return queueListItemView{
+			Icon: "▶",
+			Text: q.Current.IssueKey,
+		}, true
+	}
+
+	pendingCount := len(q.Pending)
+	if id < currentCount+pendingCount {
+		pendingIdx := id - currentCount
+		if pendingIdx >= 0 && pendingIdx < len(q.Pending) {
+			return queueListItemView{
+				Icon: "⏳",
+				Text: q.Pending[pendingIdx].IssueKey,
+			}, true
+		}
+	}
+
+	completedStart := currentCount + pendingCount
+	if id < completedStart+len(q.Completed) {
+		completedIdx := id - completedStart
+		if completedIdx >= 0 && completedIdx < len(q.Completed) {
+			return queueListItemView{
+				Icon: "✓",
+				Text: q.Completed[completedIdx].IssueKey + " (완료)",
+			}, true
+		}
+	}
+
+	failedStart := completedStart + len(q.Completed)
+	if id < failedStart+len(q.Failed) {
+		failedIdx := id - failedStart
+		if failedIdx >= 0 && failedIdx < len(q.Failed) {
+			return queueListItemView{
+				Icon: "✗",
+				Text: q.Failed[failedIdx].IssueKey + " (실패)",
+			}, true
+		}
+	}
+
+	cancelledStart := failedStart + len(q.Failed)
+	if id < cancelledStart+len(q.Cancelled) {
+		cancelledIdx := id - cancelledStart
+		if cancelledIdx >= 0 && cancelledIdx < len(q.Cancelled) {
+			return queueListItemView{
+				Icon: "⏹",
+				Text: q.Cancelled[cancelledIdx].IssueKey + " (중단)",
+			}, true
+		}
+	}
+
+	return queueListItemView{}, false
+}
+
 func (a *App) createMainContent() fyne.CanvasObject {
 	title := widget.NewLabelWithStyle(
 		"Jira AI Generator",
@@ -114,11 +199,7 @@ func (a *App) createChannelTab(channelIndex int) fyne.CanvasObject {
 	// 큐 목록
 	ch.QueueList = widget.NewList(
 		func() int {
-			count := len(a.queues[channelIndex].Pending)
-			if a.queues[channelIndex].Current != nil {
-				count++
-			}
-			return count
+			return queueListItemCount(a.queues[channelIndex])
 		},
 		func() fyne.CanvasObject {
 			return container.NewHBox(
@@ -129,19 +210,17 @@ func (a *App) createChannelTab(channelIndex int) fyne.CanvasObject {
 		func(id widget.ListItemID, obj fyne.CanvasObject) {
 			q := a.queues[channelIndex]
 			box := obj.(*fyne.Container)
-			if id == 0 && q.Current != nil {
-				box.Objects[0].(*widget.Label).SetText("▶")
-				box.Objects[1].(*widget.Label).SetText(q.Current.IssueKey)
-			} else {
-				pendingIdx := id
-				if q.Current != nil {
-					pendingIdx = id - 1
-				}
-				if pendingIdx < len(q.Pending) {
-					box.Objects[0].(*widget.Label).SetText("  ")
-					box.Objects[1].(*widget.Label).SetText(q.Pending[pendingIdx].IssueKey)
-				}
+			iconLabel := box.Objects[0].(*widget.Label)
+			textLabel := box.Objects[1].(*widget.Label)
+
+			item, ok := resolveQueueListItemView(q, int(id))
+			if !ok {
+				iconLabel.SetText("")
+				textLabel.SetText("")
+				return
 			}
+			iconLabel.SetText(item.Icon)
+			textLabel.SetText(item.Text)
 		},
 	)
 
