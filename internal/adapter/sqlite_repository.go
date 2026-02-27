@@ -454,7 +454,7 @@ func (r *SQLiteRepository) CreateAnalysisResult(result *domain.AnalysisResult) e
 		result.AnalysisPhase,
 		result.ResultPath,
 		result.PlanPath,
-		result.ExecutionPath,
+		"", // execution_path: DB 컬럼 유지 (기존 데이터 호환), 3차 분석 제거로 미사용
 		result.Status,
 		result.StartedAt,
 		result.CompletedAt,
@@ -481,13 +481,14 @@ func (r *SQLiteRepository) GetAnalysisResult(issueID int64, phase int) (*domain.
 	var result domain.AnalysisResult
 	var startedAt, completedAt sql.NullTime
 
+	var ignoredExecPath string // execution_path: DB 컬럼 유지, 3차 분석 제거로 미사용
 	err := r.db.QueryRow(query, issueID, phase).Scan(
 		&result.ID,
 		&result.IssueID,
 		&result.AnalysisPhase,
 		&result.ResultPath,
 		&result.PlanPath,
-		&result.ExecutionPath,
+		&ignoredExecPath,
 		&result.Status,
 		&startedAt,
 		&completedAt,
@@ -519,7 +520,7 @@ func (r *SQLiteRepository) UpdateAnalysisResult(result *domain.AnalysisResult) e
 	_, err := r.db.Exec(query,
 		result.ResultPath,
 		result.PlanPath,
-		result.ExecutionPath,
+		"", // execution_path: DB 컬럼 유지, 3차 분석 제거로 미사용
 		result.Status,
 		result.StartedAt,
 		result.CompletedAt,
@@ -635,13 +636,14 @@ func (r *SQLiteRepository) ListAnalysisResultsByIssue(issueID int64) ([]*domain.
 		var result domain.AnalysisResult
 		var startedAt, completedAt sql.NullTime
 
+		var ignoredExecPath string // execution_path: DB 컬럼 유지, 3차 분석 제거로 미사용
 		err := rows.Scan(
 			&result.ID,
 			&result.IssueID,
 			&result.AnalysisPhase,
 			&result.ResultPath,
 			&result.PlanPath,
-			&result.ExecutionPath,
+			&ignoredExecPath,
 			&result.Status,
 			&startedAt,
 			&completedAt,

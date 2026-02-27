@@ -30,13 +30,11 @@ type ResultPanel struct {
 	copyIssueBtn    *widget.Button
 	copyAnalysisBtn *widget.Button
 	exportBtn       *widget.Button
-	executePlanBtn  *widget.Button
 
 	// 콜백
 	onCopyIssue    func()
 	onCopyAnalysis func()
 	onExport       func()
-	onExecutePlan  func()
 }
 
 // NewResultPanel 새 ResultPanel 생성
@@ -80,13 +78,6 @@ func NewResultPanel() *ResultPanel {
 	})
 	r.exportBtn.Disable()
 
-	r.executePlanBtn = widget.NewButton("▶️ 계획 실행", func() {
-		if r.onExecutePlan != nil {
-			r.onExecutePlan()
-		}
-	})
-	r.executePlanBtn.Disable()
-
 	// 이슈 정보 탭 컨텐츠
 	issueActions := container.NewHBox(r.searchIssueBtn, r.copyIssueBtn)
 	issueContent := container.NewBorder(
@@ -101,7 +92,6 @@ func NewResultPanel() *ResultPanel {
 	analysisActions := container.NewHBox(
 		r.searchAnalysisBtn,
 		r.copyAnalysisBtn,
-		r.executePlanBtn,
 		r.exportBtn,
 	)
 	analysisContent := container.NewBorder(
@@ -157,16 +147,6 @@ func (r *ResultPanel) SetAnalysis(content string) {
 	}
 }
 
-// EnableExecutePlan 계획 실행 버튼 활성화
-func (r *ResultPanel) EnableExecutePlan() {
-	r.executePlanBtn.Enable()
-}
-
-// DisableExecutePlan 계획 실행 버튼 비활성화
-func (r *ResultPanel) DisableExecutePlan() {
-	r.executePlanBtn.Disable()
-}
-
 // SetOnCopyIssue 이슈 복사 콜백 설정
 func (r *ResultPanel) SetOnCopyIssue(callback func()) {
 	r.onCopyIssue = callback
@@ -180,11 +160,6 @@ func (r *ResultPanel) SetOnCopyAnalysis(callback func()) {
 // SetOnExport 내보내기 콜백 설정
 func (r *ResultPanel) SetOnExport(callback func()) {
 	r.onExport = callback
-}
-
-// SetOnExecutePlan 계획 실행 콜백 설정
-func (r *ResultPanel) SetOnExecutePlan(callback func()) {
-	r.onExecutePlan = callback
 }
 
 // SelectIssueTab 이슈 정보 탭 선택
@@ -215,7 +190,6 @@ func (r *ResultPanel) Reset() {
 		r.copyIssueBtn.Disable()
 		r.copyAnalysisBtn.Disable()
 		r.exportBtn.Disable()
-		r.executePlanBtn.Disable()
 		r.tabs.SelectIndex(0)
 	})
 }

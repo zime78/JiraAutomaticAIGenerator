@@ -133,21 +133,15 @@ func (v2 *AppV2State) subscribeEvents(a *App) {
 		}
 	})
 
-	// EventJobStarted 구독 - 2차/3차 분석 작업 실행
+	// EventJobStarted 구독 - 2차 분석 작업 실행
 	eb.Subscribe(state.EventJobStarted, func(event state.Event) {
 		if data, ok := event.Data.(map[string]interface{}); ok {
 			phase, _ := data["phase"].(string)
 			issueRecords, _ := data["issueRecords"].([]*domain.IssueRecord)
 
-			if event.Channel >= 0 && event.Channel < 3 && len(issueRecords) > 0 {
-				switch phase {
-				case "phase2":
-					// AI 플랜 생성 실행
-					go a.executePhase2ForV2(event.Channel, issueRecords, v2)
-				case "phase3":
-					// AI 실행
-					go a.executePhase3ForV2(event.Channel, issueRecords, v2)
-				}
+			if event.Channel >= 0 && event.Channel < 3 && len(issueRecords) > 0 && phase == "phase2" {
+				go a.executePhase2ForV2(event.Channel, issueRecords, v2)
+
 			}
 		}
 	})
@@ -261,18 +255,11 @@ func (a *App) createChannelTabV2(channelIndex int, v2 *AppV2State) fyne.CanvasOb
 		ch.ProjectPathEntry.SetText(a.config.Claude.ChannelPaths[channelIndex])
 	}
 
-	// 버튼들 - V2에서는 중지 버튼만 노출 (계획 실행은 3차 흐름에서만 처리)
+	// 버튼들 - 중지 버튼만 노출
 	stopBtn := widget.NewButtonWithIcon("중지", theme.MediaStopIcon(), func() {
 		a.stopQueueCurrent(channelIndex)
 	})
 	stopBtn.Importance = widget.DangerImportance
-
-	ch.ExecutePlanBtn = widget.NewButtonWithIcon("계획 실행", theme.MailForwardIcon(), func() {
-		a.onExecuteChannelPlan(channelIndex)
-	})
-	ch.ExecutePlanBtn.Importance = widget.WarningImportance
-	ch.ExecutePlanBtn.Disable()
-	ch.ExecutePlanBtn.Hide()
 
 	buttonRow := container.NewHBox(stopBtn)
 
@@ -292,8 +279,6 @@ func (a *App) createChannelTabV2(channelIndex int, v2 *AppV2State) fyne.CanvasOb
 	resultPanel.SetOnCopyAnalysis(func() {
 		a.onCopyChannelAnalysis(channelIndex)
 	})
-	resultPanel.DisableExecutePlan()
-
 	// 기존 위젯 참조 연결 (호환성)
 	ch.ProgressBar = widget.NewProgressBar()
 	ch.ResultText = widget.NewMultiLineEntry()
@@ -516,7 +501,3 @@ func (a *App) executePhase2ForV2(channelIndex int, records []*domain.IssueRecord
 	a.runPhase2BatchV2(channelIndex, records, v2)
 }
 
-// executePhase3ForV2 V2용 3차 분석 (AI 실행)
-func (a *App) executePhase3ForV2(channelIndex int, records []*domain.IssueRecord, v2 *AppV2State) {
-	a.runPhase3BatchV2(channelIndex, records, v2)
-}

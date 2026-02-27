@@ -17,7 +17,6 @@ type AnalysisPhase int
 
 const (
 	PhaseAnalyze AnalysisPhase = iota // Phase 1: 읽기 전용 분석 → _plan.md 생성
-	PhaseExecute                      // Phase 2: 계획 실행 → _execution.md 생성
 )
 
 // AnalysisResult contains the result of starting an analysis
@@ -614,127 +613,6 @@ echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Phase 1 완료!"
 		PlanPath:   planPath,
 		ScriptPath: scriptPath,
 		LogPath:    logFile,
-		PID:        cmd.Process.Pid,
-	}, nil
-}
-
-// ExecutePlan은 Phase 2: plan 파일을 Claude Code에 전달하여 실제 코드 수정을 실행한다.
-func (c *ClaudeCodeAdapter) ExecutePlan(planPath, workDir string) (*AnalysisResult, error) {
-	defer logger.DebugFunc("ExecutePlan")()
-	logger.Debug("ExecutePlan: planPath=%s, workDir=%s", planPath, workDir)
-
-	if !c.enabled {
-		logger.Debug("ExecutePlan: Claude integration is not enabled")
-		return nil, fmt.Errorf("Claude integration is not enabled")
-	}
-
-	effectiveDir, err := resolveWorkDir(workDir)
-	if err != nil {
-		logger.Debug("ExecutePlan: resolveWorkDir failed: %v", err)
-		return nil, err
-	}
-	logger.Debug("ExecutePlan: effectiveDir=%s", effectiveDir)
-
-	fmt.Printf("[Claude] Phase 2: 계획 실행 시작...\n")
-	fmt.Printf("[Claude] Plan File: %s\n", planPath)
-
-	// plan 파일 읽기
-	planContent, err := os.ReadFile(planPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read plan file: %w", err)
-	}
-
-	// 파일 경로 설정
-	basePath := strings.TrimSuffix(planPath, "_plan.md")
-	executionPath := basePath + "_execution.md"
-	promptFile := basePath + "_exec_prompt.txt"
-	settingsPath := basePath + "_exec_settings.json"
-	scriptPath := basePath + "_exec_run.sh"
-	logFile := basePath + "_exec_log.txt"
-
-	// 프롬프트 파일 작성
-	if err := os.WriteFile(promptFile, planContent, 0644); err != nil {
-		return nil, fmt.Errorf("failed to write prompt file: %w", err)
-	}
-	if err := c.prepareHookSettingsFile(settingsPath); err != nil {
-		return nil, err
-	}
-
-	// 래퍼 스크립트 생성
-	scriptContent := fmt.Sprintf(`#!/bin/bash
-exec > "%s" 2>&1
-echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Phase 2: 계획 실행 시작..."
-echo "Working directory: %s"
-cd "%s"
-echo "Prompt file: %s"
-echo "Output file: %s"
-echo ""
-echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Running Claude (Phase 2 - 실행)..."
-%s --settings '%s' --model %s --print "$(cat '%s')" --output-format text > /tmp/claude_exec_$$.txt 2>&1
-CLAUDE_EXIT=$?
-echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Claude exited with code: $CLAUDE_EXIT"
-echo "Output size: $(wc -c < /tmp/claude_exec_$$.txt) bytes"
-echo ""
-echo "=== Claude Output ==="
-cat /tmp/claude_exec_$$.txt
-echo "=== End Output ==="
-echo ""
-echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Writing execution result..."
-
-echo "# 실행 결과" > "%s"
-echo "" >> "%s"
-echo "📅 생성 시간: $(date '+%%Y-%%m-%%d %%H:%%M:%%S')" >> "%s"
-echo "📁 프로젝트: %s" >> "%s"
-echo "" >> "%s"
-echo "---" >> "%s"
-echo "" >> "%s"
-if [ $CLAUDE_EXIT -ne 0 ]; then
-    echo "❌ Claude 오류 발생 (exit code: $CLAUDE_EXIT)" >> "%s"
-    echo "" >> "%s"
-fi
-cat /tmp/claude_exec_$$.txt >> "%s"
-echo "" >> "%s"
-echo "---" >> "%s"
-echo "" >> "%s"
-echo "✅ 실행 완료: $(date '+%%Y-%%m-%%d %%H:%%M:%%S')" >> "%s"
-
-rm -f /tmp/claude_exec_$$.txt "%s" "%s" "%s"
-echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Phase 2 완료!"
-`,
-		logFile, effectiveDir, effectiveDir, promptFile, executionPath,
-		c.cliPath, settingsPath, c.model, promptFile,
-		executionPath, executionPath, executionPath, effectiveDir, executionPath,
-		executionPath, executionPath, executionPath,
-		executionPath, executionPath,
-		executionPath, executionPath, executionPath, executionPath, executionPath,
-		promptFile, scriptPath, settingsPath)
-
-	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
-		return nil, fmt.Errorf("failed to write script: %w", err)
-	}
-
-	// 백그라운드 프로세스로 실행
-	cmd := exec.Command("nohup", "bash", scriptPath)
-	cmd.Dir = effectiveDir
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start background process: %w", err)
-	}
-
-	go func() {
-		cmd.Wait()
-	}()
-
-	fmt.Printf("[Claude] Phase 2 시작됨 (PID: %d)\n", cmd.Process.Pid)
-	fmt.Printf("[Claude] 실행 결과: %s\n", executionPath)
-
-	logger.Debug("ExecutePlan: completed successfully, PID=%d, executionPath=%s", cmd.Process.Pid, executionPath)
-
-	return &AnalysisResult{
-		OutputPath: executionPath,
-		ScriptPath: scriptPath,
 		PID:        cmd.Process.Pid,
 	}, nil
 }

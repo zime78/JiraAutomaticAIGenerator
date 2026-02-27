@@ -27,7 +27,6 @@ func (a *App) onChannelProcess(channelIndex int) {
 	ch.ProcessBtn.Disable()
 	ch.CopyResultBtn.Disable()
 	ch.CopyAnalysisBtn.Disable()
-	ch.ExecutePlanBtn.Disable()
 	ch.ProgressBar.Show()
 	ch.ProgressBar.SetValue(0)
 	ch.StatusLabel.SetText("이슈 조회 중...")

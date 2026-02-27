@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	// phaseTaskTimeout는 2차/3차 개별 항목의 최대 대기 시간이다.
+	// phaseTaskTimeout는 2차 개별 항목의 최대 대기 시간이다.
 	phaseTaskTimeout = 30 * time.Minute
 	// maxHookRetries는 Hook 오류 발생 시 최대 재시도 횟수이다.
 	maxHookRetries = 3
@@ -33,13 +33,12 @@ var (
 	errTaskCancelled = errors.New("task cancelled")
 )
 
-// phaseRunOutcome는 2차/3차 개별 항목 실행 결과를 전달한다.
+// phaseRunOutcome는 2차 개별 항목 실행 결과를 전달한다.
 type phaseRunOutcome struct {
-	record        *domain.IssueRecord
-	phaseLabel    string
-	planPath      string
-	executionPath string
-	err           error
+	record     *domain.IssueRecord
+	phaseLabel string
+	planPath   string
+	err        error
 }
 
 // buildHistoryID는 사이드바 이력 식별자를 channel:issueID 형식으로 생성한다.
@@ -113,32 +112,11 @@ func (a *App) refreshIssueListsForSingleChannel(channelIndex, phase int, v2 *App
 		return
 	}
 
-	switch phase {
-	case 1:
-		selector.SetPhase1ListLoading(true)
-	case 2:
-		selector.SetPhase2ListLoading(true)
-	default:
-		selector.SetPhase1ListLoading(true)
-		selector.SetPhase2ListLoading(true)
-	}
+	selector.SetPhase1ListLoading(true)
 
 	token := a.nextIssueListLoadToken(channelIndex)
-	go func(targetChannel int, refreshPhase int, loadToken uint64) {
-		var phase1Issues []*domain.IssueRecord
-		var phase2Issues []*domain.IssueRecord
-		var errPhase1 error
-		var errPhase2 error
-
-		switch refreshPhase {
-		case 1:
-			phase1Issues, errPhase1 = a.listIssuesByMinPhase(targetChannel, 1)
-		case 2:
-			phase2Issues, errPhase2 = a.listIssuesByMinPhase(targetChannel, 2)
-		default:
-			phase1Issues, errPhase1 = a.listIssuesByMinPhase(targetChannel, 1)
-			phase2Issues, errPhase2 = a.listIssuesByMinPhase(targetChannel, 2)
-		}
+	go func(targetChannel int, loadToken uint64) {
+		phase1Issues, errPhase1 := a.listIssuesByMinPhase(targetChannel, 1)
 
 		fyne.Do(func() {
 			if !a.isLatestIssueListLoadToken(targetChannel, loadToken) {
@@ -150,37 +128,14 @@ func (a *App) refreshIssueListsForSingleChannel(channelIndex, phase int, v2 *App
 				return
 			}
 
-			switch refreshPhase {
-			case 1:
-				if errPhase1 != nil {
-					logger.Debug("refreshIssueListsForSingleChannel: phase1 load failed (channel=%d): %v", targetChannel, errPhase1)
-				} else {
-					targetSelector.SetPhase1Items(phase1Issues)
-				}
-				targetSelector.SetPhase1ListLoading(false)
-			case 2:
-				if errPhase2 != nil {
-					logger.Debug("refreshIssueListsForSingleChannel: phase2 load failed (channel=%d): %v", targetChannel, errPhase2)
-				} else {
-					targetSelector.SetPhase2Items(phase2Issues)
-				}
-				targetSelector.SetPhase2ListLoading(false)
-			default:
-				if errPhase1 != nil {
-					logger.Debug("refreshIssueListsForSingleChannel: phase1 load failed (channel=%d): %v", targetChannel, errPhase1)
-				} else {
-					targetSelector.SetPhase1Items(phase1Issues)
-				}
-				if errPhase2 != nil {
-					logger.Debug("refreshIssueListsForSingleChannel: phase2 load failed (channel=%d): %v", targetChannel, errPhase2)
-				} else {
-					targetSelector.SetPhase2Items(phase2Issues)
-				}
-				targetSelector.SetPhase1ListLoading(false)
-				targetSelector.SetPhase2ListLoading(false)
+			if errPhase1 != nil {
+				logger.Debug("refreshIssueListsForSingleChannel: phase1 load failed (channel=%d): %v", targetChannel, errPhase1)
+			} else {
+				targetSelector.SetPhase1Items(phase1Issues)
 			}
+			targetSelector.SetPhase1ListLoading(false)
 		})
-	}(channelIndex, phase, token)
+	}(channelIndex, token)
 }
 
 // refreshIssueListsForChannel은 특정 채널의 1차/2차 완료 목록을 갱신한다.
@@ -277,9 +232,7 @@ func (a *App) loadIssueRecordToChannelV2(issue *domain.IssueRecord, v2 *AppV2Sta
 				if result.PlanPath != "" {
 					planPath = result.PlanPath
 				}
-				if result.ExecutionPath != "" {
-					analysisPath = result.ExecutionPath
-				} else if analysisPath == "" && result.ResultPath != "" {
+				if result.ResultPath != "" {
 					analysisPath = result.ResultPath
 				}
 			}
@@ -573,37 +526,12 @@ func isHookRelatedError(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "hook")
 }
 
-// resolvePlanPathForIssue는 3차 실행 시 사용할 plan 파일 경로를 이슈별로 조회한다.
-func (a *App) resolvePlanPathForIssue(record *domain.IssueRecord) string {
-	if record == nil {
-		return ""
-	}
-	if a.analysisStore != nil {
-		if results, err := a.analysisStore.ListAnalysisResultsByIssue(record.ID); err == nil {
-			for i := len(results) - 1; i >= 0; i-- {
-				if results[i].PlanPath != "" {
-					return results[i].PlanPath
-				}
-			}
-		}
-	}
-	if record.MDPath != "" {
-		return strings.TrimSuffix(record.MDPath, ".md") + "_plan.md"
-	}
-	return ""
-}
-
 // runPhase2BatchV2는 선택된 1차 완료 항목들을 병렬로 2차 실행한다.
 func (a *App) runPhase2BatchV2(channelIndex int, records []*domain.IssueRecord, v2 *AppV2State) {
 	a.runPhaseBatchV2(channelIndex, records, "2차", v2)
 }
 
-// runPhase3BatchV2는 선택된 2차 완료 항목들을 병렬로 3차 실행한다.
-func (a *App) runPhase3BatchV2(channelIndex int, records []*domain.IssueRecord, v2 *AppV2State) {
-	a.runPhaseBatchV2(channelIndex, records, "3차", v2)
-}
-
-// runPhaseBatchV2는 2차/3차 병렬 실행 공통 흐름을 처리한다.
+// runPhaseBatchV2는 2차 병렬 실행 흐름을 처리한다.
 func (a *App) runPhaseBatchV2(channelIndex int, records []*domain.IssueRecord, phaseLabel string, v2 *AppV2State) {
 	if len(records) == 0 {
 		return
@@ -618,11 +546,7 @@ func (a *App) runPhaseBatchV2(channelIndex int, records []*domain.IssueRecord, p
 		return
 	}
 
-	if phaseLabel == "2차" {
-		v2.appState.UpdatePhase(channelIndex, state.PhaseAIPlanGeneration)
-	} else {
-		v2.appState.UpdatePhase(channelIndex, state.PhaseAIExecution)
-	}
+	v2.appState.UpdatePhase(channelIndex, state.PhaseAIPlanGeneration)
 	fyne.Do(func() {
 		v2.progressPanels[channelIndex].SetProgress(0.75, fmt.Sprintf("%s 작업 시작...", phaseLabel))
 	})
@@ -635,11 +559,7 @@ func (a *App) runPhaseBatchV2(channelIndex int, records []*domain.IssueRecord, p
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if phaseLabel == "2차" {
-				resultsCh <- a.runPhase2RecordV2(channelIndex, record, workDir, v2)
-				return
-			}
-			resultsCh <- a.runPhase3RecordV2(channelIndex, record, workDir, v2)
+			resultsCh <- a.runPhase2RecordV2(channelIndex, record, workDir, v2)
 		}()
 	}
 
@@ -676,23 +596,15 @@ func (a *App) runPhaseBatchV2(channelIndex int, records []*domain.IssueRecord, p
 			return
 		}
 
-		if phaseLabel == "2차" {
-			v2.appState.UpdatePhase(channelIndex, state.PhaseAIPlanReady)
-			// 2차 완료는 3차 대기 상태이므로 75%를 유지하고 안내 메시지만 갱신한다.
-			v2.progressPanels[channelIndex].SetProgress(0.75, "AI 플랜 준비됨 (3차 실행 항목을 선택하세요)")
-		} else {
-			v2.appState.UpdatePhase(channelIndex, state.PhaseCompleted)
-			v2.progressPanels[channelIndex].SetComplete()
-		}
+		v2.appState.UpdatePhase(channelIndex, state.PhaseCompleted)
+		v2.progressPanels[channelIndex].SetComplete()
 	})
 
-	if phaseLabel == "2차" {
-		v2.appState.EventBus.Publish(state.Event{
-			Type:    state.EventIssueListRefresh,
-			Channel: channelIndex,
-			Data:    map[string]interface{}{"phase": 2},
-		})
-	}
+	v2.appState.EventBus.Publish(state.Event{
+		Type:    state.EventIssueListRefresh,
+		Channel: channelIndex,
+		Data:    map[string]interface{}{"phase": 1},
+	})
 }
 
 // runPhase2RecordV2는 단일 이슈의 2차 실행을 처리한다.
@@ -780,101 +692,3 @@ func (a *App) runPhase2RecordV2(channelIndex int, record *domain.IssueRecord, wo
 	return outcome
 }
 
-// runPhase3RecordV2는 단일 이슈의 3차 실행을 처리한다.
-func (a *App) runPhase3RecordV2(channelIndex int, record *domain.IssueRecord, workDir string, v2 *AppV2State) phaseRunOutcome {
-	outcome := phaseRunOutcome{record: record, phaseLabel: "3차"}
-	if record == nil {
-		outcome.err = fmt.Errorf("record is nil")
-		return outcome
-	}
-
-	planPath := a.resolvePlanPathForIssue(record)
-	if planPath == "" {
-		outcome.err = fmt.Errorf("plan path not found for issue %s", record.IssueKey)
-		return outcome
-	}
-
-	var result *adapter.AnalysisResult
-	var err error
-	hookRetryCount := 0
-	for {
-		result, err = a.claudeAdapter.ExecutePlan(planPath, workDir)
-		if err == nil {
-			task := &RunningTask{
-				TaskID:       fmt.Sprintf("phase3:%d:%d", channelIndex, record.ID),
-				IssueID:      record.ID,
-				IssueKey:     record.IssueKey,
-				ChannelIndex: channelIndex,
-				PhaseLabel:   "3차",
-				PID:          result.PID,
-				ScriptPath:   result.ScriptPath,
-				LogPath:      strings.TrimSuffix(result.OutputPath, "_execution.md") + "_exec_log.txt",
-			}
-			a.registerRunningTask(task)
-			waitErr := waitForTaskResult(task, result.OutputPath)
-			a.unregisterRunningTask(channelIndex, task.TaskID)
-			if waitErr == nil {
-				break
-			}
-			if isHookRelatedError(waitErr) && hookRetryCount < maxHookRetries && a.askRetryForHookFailure(record.IssueKey, "3차", waitErr) {
-				hookRetryCount++
-				continue
-			}
-			outcome.err = waitErr
-			return outcome
-		}
-		if isHookRelatedError(err) && hookRetryCount < maxHookRetries && a.askRetryForHookFailure(record.IssueKey, "3차", err) {
-			hookRetryCount++
-			continue
-		}
-		outcome.err = err
-		return outcome
-	}
-
-	record.Phase = 3
-	if updateErr := a.issueStore.UpdateIssue(record); updateErr != nil {
-		outcome.err = updateErr
-		return outcome
-	}
-
-	if a.analysisStore != nil {
-		now := time.Now()
-		if createErr := a.analysisStore.CreateAnalysisResult(&domain.AnalysisResult{
-			IssueID:       record.ID,
-			AnalysisPhase: 2,
-			ResultPath:    result.OutputPath,
-			PlanPath:      planPath,
-			ExecutionPath: result.OutputPath,
-			Status:        "completed",
-			CompletedAt:   &now,
-		}); createErr != nil {
-			logger.Debug("runPhase3RecordV2: CreateAnalysisResult failed: %v", createErr)
-		}
-	}
-
-	outcome.executionPath = result.OutputPath
-	analysisContent := fmt.Sprintf("AI 실행 완료\n이슈: %s\n출력: %s", record.IssueKey, result.OutputPath)
-	if raw, readErr := os.ReadFile(result.OutputPath); readErr == nil {
-		analysisContent = string(raw)
-	}
-	fyne.Do(func() {
-		v2.resultPanels[channelIndex].SetAnalysis(analysisContent)
-		a.channels[channelIndex].AnalysisText.SetText(v2.resultPanels[channelIndex].GetAnalysis())
-		a.channels[channelIndex].CurrentAnalysisPath = result.OutputPath
-		a.channels[channelIndex].CurrentPlanPath = planPath
-	})
-
-	v2.appState.EventBus.Publish(state.Event{
-		Type:    state.EventPhase3Complete,
-		Channel: channelIndex,
-		Data:    record,
-	})
-
-	// 3차 완료 직후 2차 완료 목록(3차 분석 대상)을 즉시 새로고침해 완료 색상을 바로 반영한다.
-	v2.appState.EventBus.Publish(state.Event{
-		Type:    state.EventIssueListRefresh,
-		Channel: channelIndex,
-		Data:    map[string]interface{}{"phase": 2},
-	})
-	return outcome
-}

@@ -35,8 +35,7 @@ type ChannelState struct {
 	StatusLabel     *widget.Label
 	CopyResultBtn   *widget.Button
 	CopyAnalysisBtn *widget.Button
-	ExecutePlanBtn  *widget.Button
-	QueueList       *widget.List
+	QueueList *widget.List
 	InnerTabs       *container.AppTabs
 
 	// 채널별 상태
@@ -52,9 +51,8 @@ type AnalysisJob struct {
 	IssueKey        string
 	ScriptPath      string
 	AnalysisPath    string
-	PlanPath        string // Phase 1 결과: _plan.md 경로
-	ExecutionPath   string // Phase 2 결과: _execution.md 경로
-	LogPath         string // 로그 파일 경로
+	PlanPath string // Phase 1 결과: _plan.md 경로
+	LogPath  string // 로그 파일 경로
 	MDPath          string
 	StartTime       string
 	PID             int
@@ -214,20 +212,10 @@ func (a *App) processQueue(channelIndex int) {
 		queue.IsRunning = true
 		ch.QueueList.Refresh()
 
-		phaseLabel := "Phase 1"
-		if job.Phase == adapter.PhaseExecute {
-			phaseLabel = "Phase 2"
-		}
+		fmt.Printf("[Queue] %s: Phase 1 시작 - %s\n", queue.Name, job.IssueKey)
+		ch.StatusLabel.SetText(fmt.Sprintf("%s: %s Phase 1 시작", queue.Name, job.IssueKey))
 
-		fmt.Printf("[Queue] %s: %s 시작 - %s\n", queue.Name, phaseLabel, job.IssueKey)
-		ch.StatusLabel.SetText(fmt.Sprintf("%s: %s %s 시작", queue.Name, job.IssueKey, phaseLabel))
-
-		var outcome QueueJobOutcome
-		if job.Phase == adapter.PhaseExecute {
-			outcome = a.executePhase2(channelIndex, job)
-		} else {
-			outcome = a.executePhase1(channelIndex, job)
-		}
+		outcome := a.executePhase1(channelIndex, job)
 
 		// 실행 결과에 따라 상태별 목록에 기록한다.
 		recordQueueJobByOutcome(queue, job, outcome)
@@ -237,11 +225,11 @@ func (a *App) processQueue(channelIndex int) {
 
 		switch outcome {
 		case QueueJobOutcomeCompleted:
-			fmt.Printf("[Queue] %s: %s 완료 - %s\n", queue.Name, phaseLabel, job.IssueKey)
+			fmt.Printf("[Queue] %s: Phase 1 완료 - %s\n", queue.Name, job.IssueKey)
 		case QueueJobOutcomeCancelled:
-			fmt.Printf("[Queue] %s: %s 중단 - %s\n", queue.Name, phaseLabel, job.IssueKey)
+			fmt.Printf("[Queue] %s: Phase 1 중단 - %s\n", queue.Name, job.IssueKey)
 		default:
-			fmt.Printf("[Queue] %s: %s 실패 - %s\n", queue.Name, phaseLabel, job.IssueKey)
+			fmt.Printf("[Queue] %s: Phase 1 실패 - %s\n", queue.Name, job.IssueKey)
 		}
 	}
 }
@@ -280,34 +268,6 @@ func (a *App) executePhase1(channelIndex int, job *AnalysisJob) QueueJobOutcome 
 	return a.waitForJobCompletion(channelIndex, job)
 }
 
-// executePhase2는 Phase 2: plan 파일을 실행한다.
-func (a *App) executePhase2(channelIndex int, job *AnalysisJob) QueueJobOutcome {
-	ch := a.channels[channelIndex]
-
-	projectPath := strings.TrimSpace(ch.ProjectPathEntry.Text)
-	result, err := a.claudeAdapter.ExecutePlan(job.PlanPath, projectPath)
-	if err != nil {
-		fmt.Printf("[Queue] %s: Phase 2 오류 - %s: %v\n", a.queues[channelIndex].Name, job.IssueKey, err)
-		ch.StatusLabel.SetText(fmt.Sprintf("Phase 2 오류: %s - %v", job.IssueKey, err))
-		return QueueJobOutcomeFailed
-	}
-
-	job.PID = result.PID
-	job.AnalysisPath = result.OutputPath
-	job.ExecutionPath = result.OutputPath
-	job.ScriptPath = result.ScriptPath
-	job.LogPath = strings.TrimSuffix(result.OutputPath, "_execution.md") + "_exec_log.txt"
-
-	// 채널별 상태 업데이트
-	ch.CurrentAnalysisPath = result.OutputPath
-	ch.CurrentScriptPath = result.ScriptPath
-
-	ch.QueueList.Refresh()
-
-	// Wait for completion
-	return a.waitForJobCompletion(channelIndex, job)
-}
-
 // waitForJobCompletion waits for a job to complete while displaying progress
 func (a *App) waitForJobCompletion(channelIndex int, job *AnalysisJob) QueueJobOutcome {
 	ticker := time.NewTicker(3 * time.Second)
@@ -315,11 +275,6 @@ func (a *App) waitForJobCompletion(channelIndex int, job *AnalysisJob) QueueJobO
 
 	startTime := time.Now()
 	var lastLogSize int64
-
-	phaseLabel := "Phase 1"
-	if job.Phase == adapter.PhaseExecute {
-		phaseLabel = "Phase 2"
-	}
 
 	ch := a.channels[channelIndex]
 	queueName := a.queues[channelIndex].Name
@@ -338,29 +293,27 @@ func (a *App) waitForJobCompletion(channelIndex int, job *AnalysisJob) QueueJobO
 
 			// 사용자 중단 요청된 작업은 중단 상태로 처리한다.
 			if job.CancelRequested {
-				fmt.Printf("[Queue] %s: %s %s 중단됨 (%s)\n", queueName, job.IssueKey, phaseLabel, elapsedStr)
-				ch.StatusLabel.SetText(fmt.Sprintf("⏹ %s %s 중단됨 (%s)", job.IssueKey, phaseLabel, elapsedStr))
+				fmt.Printf("[Queue] %s: %s 중단됨 (%s)\n", queueName, job.IssueKey, elapsedStr)
+				ch.StatusLabel.SetText(fmt.Sprintf("⏹ %s 중단됨 (%s)", job.IssueKey, elapsedStr))
 				return QueueJobOutcomeCancelled
 			}
 
 			// 결과 파일 로드
 			resultPath := job.AnalysisPath
-			if job.Phase == adapter.PhaseAnalyze && job.PlanPath != "" {
+			if job.PlanPath != "" {
 				resultPath = job.PlanPath
 			}
 			content, readErr := os.ReadFile(resultPath)
 			if readErr != nil {
-				fmt.Printf("[Queue] %s: %s %s 실패 - 결과 파일 읽기 오류: %v\n", queueName, job.IssueKey, phaseLabel, readErr)
-				ch.StatusLabel.SetText(fmt.Sprintf("❌ %s %s 실패 (결과 파일 읽기 오류)", job.IssueKey, phaseLabel))
+				fmt.Printf("[Queue] %s: %s 실패 - 결과 파일 읽기 오류: %v\n", queueName, job.IssueKey, readErr)
+				ch.StatusLabel.SetText(fmt.Sprintf("❌ %s 실패 (결과 파일 읽기 오류)", job.IssueKey))
 				return QueueJobOutcomeFailed
 			}
 			ch.AnalysisText.SetText(string(content))
 			ch.CopyAnalysisBtn.Enable()
 
-			// Phase 1 완료 시 "계획 실행" 버튼 활성화
-			if job.Phase == adapter.PhaseAnalyze && job.PlanPath != "" {
+			if job.PlanPath != "" {
 				ch.CurrentPlanPath = job.PlanPath
-				ch.ExecutePlanBtn.Enable()
 			}
 
 			// 완료 작업 목록에 추가
@@ -371,8 +324,8 @@ func (a *App) waitForJobCompletion(channelIndex int, job *AnalysisJob) QueueJobO
 				a.historyList.Refresh()
 			}
 
-			fmt.Printf("[Queue] %s: %s %s 완료 (%s)\n", queueName, job.IssueKey, phaseLabel, elapsedStr)
-			ch.StatusLabel.SetText(fmt.Sprintf("✅ %s %s 완료 (%s)", job.IssueKey, phaseLabel, elapsedStr))
+			fmt.Printf("[Queue] %s: %s 완료 (%s)\n", queueName, job.IssueKey, elapsedStr)
+			ch.StatusLabel.SetText(fmt.Sprintf("✅ %s 완료 (%s)", job.IssueKey, elapsedStr))
 			return QueueJobOutcomeCompleted
 		}
 
@@ -383,7 +336,7 @@ func (a *App) waitForJobCompletion(channelIndex int, job *AnalysisJob) QueueJobO
 			if err == nil {
 				if int64(len(logContent)) != lastLogSize {
 					lastLogSize = int64(len(logContent))
-					fmt.Printf("[Queue] %s %s: %s (경과: %s, 로그: %d bytes)\n", queueName, phaseLabel, job.IssueKey, elapsedStr, len(logContent))
+					fmt.Printf("[Queue] %s: %s (경과: %s, 로그: %d bytes)\n", queueName, job.IssueKey, elapsedStr, len(logContent))
 				}
 
 				logStr := string(logContent)
@@ -402,7 +355,7 @@ func (a *App) waitForJobCompletion(channelIndex int, job *AnalysisJob) QueueJobO
 		if job.CancelRequested {
 			status = "중지 요청됨..."
 		}
-		ch.StatusLabel.SetText(fmt.Sprintf("⏳ %s: %s %s (경과: %s)", job.IssueKey, phaseLabel, status, elapsedStr))
+		ch.StatusLabel.SetText(fmt.Sprintf("⏳ %s: %s (경과: %s)", job.IssueKey, status, elapsedStr))
 	}
 
 	return QueueJobOutcomeFailed
@@ -451,7 +404,6 @@ func (a *App) onStopAllQueues() {
 func extractIssueKeyFromPath(path string) string {
 	base := filepath.Base(path)
 	base = strings.TrimSuffix(base, "_plan.md")
-	base = strings.TrimSuffix(base, "_execution.md")
 	base = strings.TrimSuffix(base, "_analysis.md")
 	base = strings.TrimSuffix(base, ".md")
 	return base
@@ -462,8 +414,6 @@ func mapAdapterPhaseToStatePhase(adapterPhase adapter.AnalysisPhase) state.Proce
 	switch adapterPhase {
 	case adapter.PhaseAnalyze:
 		return state.PhaseAnalyzing
-	case adapter.PhaseExecute:
-		return state.PhaseAIExecution
 	default:
 		return state.PhaseIdle
 	}

@@ -177,20 +177,11 @@ func (a *App) createChannelTab(channelIndex int) fyne.CanvasObject {
 	})
 	stopBtn.Importance = widget.DangerImportance
 
-	ch.ExecutePlanBtn = widget.NewButtonWithIcon("계획 실행", theme.MailForwardIcon(), func() {
-		a.onExecuteChannelPlan(channelIndex)
-	})
-	ch.ExecutePlanBtn.Importance = widget.WarningImportance
-	ch.ExecutePlanBtn.Disable()
-	if !a.claudeAdapter.IsEnabled() {
-		ch.ExecutePlanBtn.Hide()
-	}
-
 	refreshBtn := widget.NewButtonWithIcon("새로고침", theme.ViewRefreshIcon(), func() {
 		a.onRefreshChannelAnalysis(channelIndex)
 	})
 
-	buttonRow := container.NewHBox(ch.ProcessBtn, addBtn, stopBtn, ch.ExecutePlanBtn, refreshBtn)
+	buttonRow := container.NewHBox(ch.ProcessBtn, addBtn, stopBtn, refreshBtn)
 
 	// 진행바
 	ch.ProgressBar = widget.NewProgressBar()

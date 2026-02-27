@@ -49,7 +49,7 @@ func (t *completedListTheme) Size(name fyne.ThemeSizeName) float32 {
 	return t.base.Size(name)
 }
 
-// AnalysisSelector 2차/3차 분석 선택 UI 컴포넌트
+// AnalysisSelector 2차 분석 선택 UI 컴포넌트
 type AnalysisSelector struct {
 	widget.BaseWidget
 
@@ -61,27 +61,18 @@ type AnalysisSelector struct {
 	phase2LoadIcon *widget.Icon
 	phase2Status   *widget.Label
 
-	// 2차 완료 항목 (3차 분석 대상)
-	phase3List     *CompletedList
-	startPhase3    *widget.Button
-	phase3LoadIcon *widget.Icon
-	phase3Status   *widget.Label
-
 	eventBus   *state.EventBus
 	channelIdx int
 
 	// 선택된 항목
 	selectedPhase2Item *domain.IssueRecord
-	selectedPhase3Item *domain.IssueRecord
 
 	// 현재 실행 중인 Phase
 	currentPhase state.ProcessPhase
 
 	// 목록 로딩 상태(메뉴 전환/새로고침 시 표시)
 	phase2ListLoading bool
-	phase3ListLoading bool
 	phase2PrevStatus  string
-	phase3PrevStatus  string
 }
 
 // NewAnalysisSelector 새 AnalysisSelector 생성
@@ -135,54 +126,8 @@ func NewAnalysisSelector(eventBus *state.EventBus, channelIdx int) *AnalysisSele
 		a.phase2List, // Center - 리스트
 	)
 
-	// 3차 분석 섹션 (2차 완료 항목 선택)
-	phase3Label := widget.NewLabelWithStyle("2차 완료 항목 (3차 분석 대상)", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	a.phase3List = NewCompletedList(3) // Phase 3 이상이면 완료
-	a.phase3List.SetOnSelect(func(record *domain.IssueRecord) {
-		a.selectedPhase3Item = record
-		if a.currentPhase != state.PhaseAIExecution {
-			a.startPhase3.Enable()
-		}
-	})
-	a.phase3List.SetOnDelete(func(record *domain.IssueRecord) {
-		a.onDeletePhase3Item(record)
-	})
-
-	a.startPhase3 = widget.NewButton("AI 실행", a.onStartPhase3)
-	a.startPhase3.Disable() // 초기에는 비활성화
-
-	a.phase3LoadIcon = widget.NewIcon(theme.ViewRefreshIcon())
-	a.phase3LoadIcon.Hide()
-	a.phase3Status = widget.NewLabel("대기 중")
-
-	// 새로고침 버튼 추가
-	refreshPhase3Btn := widget.NewButtonWithIcon("", theme.ViewRefreshIcon(), func() {
-		// 2차 완료 목록 새로고침 이벤트 발행
-		a.eventBus.Publish(state.Event{
-			Type:    state.EventIssueListRefresh,
-			Channel: a.channelIdx,
-			Data:    map[string]interface{}{"phase": 2},
-		})
-	})
-
-	// 헤더: 라벨 + (새로고침 | 상태 | 버튼)
-	phase3StatusBox := container.NewHBox(a.phase3LoadIcon, a.phase3Status)
-	phase3Header := container.NewVBox(
-		phase3Label,
-		container.NewHBox(refreshPhase3Btn, phase3StatusBox, layout.NewSpacer(), a.startPhase3),
-	)
-
-	phase3Section := container.NewBorder(
-		phase3Header, // Top - 라벨 + 상태 + 버튼
-		nil,          // Bottom - 없음
-		nil, nil,
-		a.phase3List, // Center - 리스트
-	)
-
-	// 전체 레이아웃: 2차/3차 섹션을 수직 분할로 배치 (각각 50%)
-	split := container.NewVSplit(phase2Section, phase3Section)
-	split.SetOffset(0.5)
-	a.containerObj = split
+	// 전체 레이아웃: 2차 분석 섹션만 표시
+	a.containerObj = phase2Section
 
 	a.ExtendBaseWidget(a)
 	a.subscribeToEvents()
@@ -217,32 +162,17 @@ func (a *AnalysisSelector) subscribeToEvents() {
 		})
 	})
 
-	// Phase2 완료 이벤트 구독 - Phase3 리스트 갱신
+	// Phase2 완료 이벤트 구독
 	a.eventBus.Subscribe(state.EventPhase2Complete, func(event state.Event) {
 		if event.Channel != a.channelIdx {
 			return
 		}
-		// Phase3 리스트 갱신 트리거
 		a.runOnUIThread(func() {
-			a.phase3Status.SetText("새 항목이 반영되었습니다 (체크 후 AI 실행)")
+			a.phase2Status.SetText("🟢 AI 플랜 생성 완료")
 
 			// Phase2 완료 시 Phase2 버튼 다시 활성화 (다음 작업 가능)
 			if a.selectedPhase2Item != nil {
 				a.startPhase2.Enable()
-			}
-		})
-	})
-
-	// Phase3 완료 이벤트 구독
-	a.eventBus.Subscribe(state.EventPhase3Complete, func(event state.Event) {
-		if event.Channel != a.channelIdx {
-			return
-		}
-
-		a.runOnUIThread(func() {
-			// Phase3 완료 시 Phase3 버튼 다시 활성화 (다음 작업 가능)
-			if a.selectedPhase3Item != nil {
-				a.startPhase3.Enable()
 			}
 		})
 	})
@@ -288,33 +218,6 @@ func (a *AnalysisSelector) SetPhase1ListLoading(loading bool) {
 	})
 }
 
-// SetPhase2ListLoading은 2차 완료 목록(3차 분석 대상)의 로딩 표시를 제어한다.
-func (a *AnalysisSelector) SetPhase2ListLoading(loading bool) {
-	a.runOnUIThread(func() {
-		if loading {
-			if !a.phase3ListLoading {
-				a.phase3PrevStatus = a.phase3Status.Text
-			}
-			a.phase3ListLoading = true
-			a.phase3LoadIcon.Show()
-			a.phase3Status.SetText("로딩 중...")
-			return
-		}
-
-		if a.phase3ListLoading {
-			a.phase3ListLoading = false
-			a.phase3LoadIcon.Hide()
-			if a.phase3Status.Text == "로딩 중..." {
-				if a.phase3PrevStatus != "" {
-					a.phase3Status.SetText(a.phase3PrevStatus)
-				} else {
-					a.phase3Status.SetText("대기 중")
-				}
-			}
-		}
-	})
-}
-
 // updateUIForPhase Phase에 따라 UI 업데이트
 func (a *AnalysisSelector) updateUIForPhase(phase state.ProcessPhase) {
 	switch phase {
@@ -328,29 +231,20 @@ func (a *AnalysisSelector) updateUIForPhase(phase state.ProcessPhase) {
 			a.startPhase2.Enable()
 		}
 
-	case state.PhaseAIExecution:
-		a.phase3Status.SetText("AI 플랜 실행 중...")
-		a.startPhase3.Disable()
-
 	case state.PhaseCompleted:
-		a.phase3Status.SetText("🟢 AI 실행 완료")
-		if a.selectedPhase3Item != nil {
-			a.startPhase3.Enable()
+		a.phase2Status.SetText("🟢 완료")
+		if a.selectedPhase2Item != nil {
+			a.startPhase2.Enable()
 		}
 
 	case state.PhaseFailed:
 		a.phase2Status.SetText("실패")
-		a.phase3Status.SetText("실패")
 		if a.selectedPhase2Item != nil {
 			a.startPhase2.Enable()
-		}
-		if a.selectedPhase3Item != nil {
-			a.startPhase3.Enable()
 		}
 
 	case state.PhaseIdle:
 		a.phase2Status.SetText("대기 중")
-		a.phase3Status.SetText("대기 중")
 	}
 }
 
@@ -360,14 +254,6 @@ func (a *AnalysisSelector) SetPhase1Items(items []*domain.IssueRecord) {
 	a.phase2List.SetItems(items)
 	a.selectedPhase2Item = nil
 	a.startPhase2.Disable()
-}
-
-// SetPhase2Items 2차 완료 항목 설정 (3차 분석 대상)
-func (a *AnalysisSelector) SetPhase2Items(items []*domain.IssueRecord) {
-	logger.Debug("SetPhase2Items: channel=%d, item_count=%d", a.channelIdx, len(items))
-	a.phase3List.SetItems(items)
-	a.selectedPhase3Item = nil
-	a.startPhase3.Disable()
 }
 
 // onStartPhase2 2차 분석 시작 핸들러
@@ -405,41 +291,6 @@ func (a *AnalysisSelector) onStartPhase2() {
 	a.phase2Status.SetText("AI 플랜 생성 중...")
 }
 
-// onStartPhase3 3차 분석 시작 핸들러
-func (a *AnalysisSelector) onStartPhase3() {
-	selectedItems := a.phase3List.GetSelectedItems()
-	if len(selectedItems) == 0 {
-		return
-	}
-
-	logger.Debug("onStartPhase3: starting phase3 analysis, channel=%d, selected_count=%d", a.channelIdx, len(selectedItems))
-	for i, item := range selectedItems {
-		logger.Debug("onStartPhase3: selected item[%d]: id=%d, key=%s", i, item.ID, item.IssueKey)
-	}
-
-	// Phase 변경: PhaseAIExecution으로 전환
-	a.eventBus.PublishSync(state.Event{
-		Type:    state.EventPhaseChange,
-		Channel: a.channelIdx,
-		Data:    state.PhaseAIExecution,
-	})
-
-	// 3차 분석 시작 이벤트 발행 (선택된 모든 항목)
-	a.eventBus.PublishSync(state.Event{
-		Type:    state.EventJobStarted,
-		Channel: a.channelIdx,
-		Data: map[string]interface{}{
-			"phase":        "phase3",
-			"issueRecords": selectedItems,
-			"count":        len(selectedItems),
-		},
-	})
-
-	// 버튼 비활성화 (Phase 완료 시 다시 활성화)
-	a.startPhase3.Disable()
-	a.phase3Status.SetText("AI 플랜 실행 중...")
-}
-
 // onDeletePhase2Item은 2차 섹션 목록 항목 삭제 요청 이벤트를 발행한다.
 func (a *AnalysisSelector) onDeletePhase2Item(record *domain.IssueRecord) {
 	if record == nil {
@@ -450,21 +301,6 @@ func (a *AnalysisSelector) onDeletePhase2Item(record *domain.IssueRecord) {
 		Channel: a.channelIdx,
 		Data: map[string]interface{}{
 			"listPhase":   2,
-			"issueRecord": record,
-		},
-	})
-}
-
-// onDeletePhase3Item은 3차 섹션 목록 항목 삭제 요청 이벤트를 발행한다.
-func (a *AnalysisSelector) onDeletePhase3Item(record *domain.IssueRecord) {
-	if record == nil {
-		return
-	}
-	a.eventBus.PublishSync(state.Event{
-		Type:    state.EventIssueDeleteRequest,
-		Channel: a.channelIdx,
-		Data: map[string]interface{}{
-			"listPhase":   3,
 			"issueRecord": record,
 		},
 	})

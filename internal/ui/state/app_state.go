@@ -104,7 +104,6 @@ type JobData struct {
 	MDPath        string
 	PlanPath      string
 	AnalysisPath  string
-	ExecutionPath string
 	ScriptPath    string
 	LogPath       string
 	Phase         ProcessPhase
@@ -457,9 +456,7 @@ func (s *AppState) LoadFromDB() error {
 		switch issue.Phase {
 		case 1:
 			job.Phase = PhasePhase1Complete
-		case 2:
-			job.Phase = PhaseAIPlanReady
-		case 3:
+		case 2, 3:
 			job.Phase = PhaseCompleted
 		default:
 			job.Phase = PhaseIdle
@@ -472,9 +469,6 @@ func (s *AppState) LoadFromDB() error {
 				for _, result := range results {
 					if result.PlanPath != "" {
 						job.PlanPath = result.PlanPath
-					}
-					if result.ExecutionPath != "" {
-						job.ExecutionPath = result.ExecutionPath
 					}
 					if result.ResultPath != "" {
 						job.AnalysisPath = result.ResultPath
@@ -529,7 +523,7 @@ func (s *AppState) UpdateIssuePhase(issueKey string, phase int) error {
 }
 
 // SaveAnalysisResult 분석 결과 저장
-func (s *AppState) SaveAnalysisResult(issueKey string, analysisPhase int, planPath, executionPath, resultPath string, status string) error {
+func (s *AppState) SaveAnalysisResult(issueKey string, analysisPhase int, planPath, resultPath string, status string) error {
 	if s.IssueStore == nil || s.AnalysisStore == nil {
 		return nil
 	}
@@ -545,8 +539,7 @@ func (s *AppState) SaveAnalysisResult(issueKey string, analysisPhase int, planPa
 		IssueID:       issue.ID,
 		AnalysisPhase: analysisPhase,
 		PlanPath:      planPath,
-		ExecutionPath: executionPath,
-		ResultPath:    resultPath,
+		ResultPath: resultPath,
 		Status:        status,
 		CompletedAt:   &now,
 	}

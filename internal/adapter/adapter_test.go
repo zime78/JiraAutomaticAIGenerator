@@ -142,33 +142,6 @@ func TestAnalyzeAndGeneratePlan_EmptyWorkDir(t *testing.T) {
 	}
 }
 
-func TestExecutePlan_Disabled(t *testing.T) {
-	// Claude 비활성 상태에서 호출 시 에러 반환
-	claude := adapter.NewClaudeCodeAdapter("claude", false, "", "/tmp/hook.sh")
-	_, err := claude.ExecutePlan("/test/plan.md", "/tmp")
-	if err == nil {
-		t.Error("비활성 상태에서 에러가 반환되어야 합니다")
-	}
-}
-
-func TestExecutePlan_EmptyWorkDir(t *testing.T) {
-	// 빈 workDir로 호출 시 에러 반환
-	claude := adapter.NewClaudeCodeAdapter("claude", true, "", "/tmp/hook.sh")
-	_, err := claude.ExecutePlan("/test/plan.md", "")
-	if err == nil {
-		t.Error("빈 프로젝트 경로에서 에러가 반환되어야 합니다")
-	}
-}
-
-func TestExecutePlan_FileNotFound(t *testing.T) {
-	// 존재하지 않는 plan 파일 호출 시 에러 반환
-	claude := adapter.NewClaudeCodeAdapter("claude", true, "", "/tmp/hook.sh")
-	_, err := claude.ExecutePlan("/nonexistent/plan.md", "/tmp")
-	if err == nil {
-		t.Error("존재하지 않는 파일에 대해 에러가 반환되어야 합니다")
-	}
-}
-
 func TestAnalyzeAndGeneratePlan_HookPathRequired(t *testing.T) {
 	tempDir := t.TempDir()
 	mdPath := filepath.Join(tempDir, "TEST-999.md")

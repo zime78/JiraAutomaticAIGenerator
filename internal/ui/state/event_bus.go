@@ -30,7 +30,6 @@ const (
 	EventSidebarAction      EventType = "sidebar.action"       // Sidebar에서 액션 발생
 	EventPhase1Complete     EventType = "phase1.complete"      // 1차 분석 완료
 	EventPhase2Complete     EventType = "phase2.complete"      // 2차 분석 완료 (Plan 준비됨)
-	EventPhase3Complete     EventType = "phase3.complete"      // 3차 분석 완료 (실행 완료)
 	EventDBSync             EventType = "db.sync"              // DB 동기화 완료
 	EventIssueListRefresh   EventType = "issue.list.refresh"   // 이슈 목록 갱신 필요
 	EventIssueDeleteRequest EventType = "issue.delete.request" // 이슈 삭제 요청
@@ -48,7 +47,6 @@ const (
 	PhasePhase1Complete   // 1차 완료 (MD 생성됨)
 	PhaseAIPlanGeneration // 2차: AI Plan 생성 중
 	PhaseAIPlanReady      // 2차 완료: Plan 준비됨
-	PhaseAIExecution      // 3차: Plan 실행 중
 	PhaseAnalyzing        // 기존 유지 (하위 호환)
 	PhaseCompleted
 	PhaseFailed
@@ -73,8 +71,6 @@ func (p ProcessPhase) String() string {
 		return "AI 플랜 생성 중"
 	case PhaseAIPlanReady:
 		return "AI 플랜 준비됨"
-	case PhaseAIExecution:
-		return "AI 플랜 실행 중"
 	case PhaseAnalyzing:
 		return "AI 분석"
 	case PhaseCompleted:
@@ -105,8 +101,6 @@ func (p ProcessPhase) Progress() float64 {
 		return 0.7
 	case PhaseAIPlanReady:
 		return 0.75
-	case PhaseAIExecution:
-		return 0.85
 	case PhaseAnalyzing:
 		return 0.8
 	case PhaseCompleted:

@@ -10,7 +10,7 @@ type IssueRecord struct {
 	Description  string    `json:"description"`
 	JiraURL      string    `json:"jira_url"`
 	MDPath       string    `json:"md_path"`
-	Phase        int       `json:"phase"`         // 1: 1차완료, 2: 2차완료, 3: 3차완료
+	Phase        int       `json:"phase"`         // 1: 1차완료, 2: 2차완료
 	Status       string    `json:"status"`        // active, archived
 	ChannelIndex int       `json:"channel_index"`
 	CreatedAt    time.Time `json:"created_at"`
@@ -21,10 +21,9 @@ type IssueRecord struct {
 type AnalysisResult struct {
 	ID            int64      `json:"id"`
 	IssueID       int64      `json:"issue_id"`
-	AnalysisPhase int        `json:"analysis_phase"` // 1: PhaseAnalyze, 2: PhaseExecute
+	AnalysisPhase int        `json:"analysis_phase"` // 1: PhaseAnalyze
 	ResultPath    string     `json:"result_path"`
 	PlanPath      string     `json:"plan_path"`
-	ExecutionPath string     `json:"execution_path"`
 	Status        string     `json:"status"` // pending, running, completed, failed
 	StartedAt     *time.Time `json:"started_at"`
 	CompletedAt   *time.Time `json:"completed_at"`

@@ -9,57 +9,9 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2/dialog"
-
-	"jira-ai-generator/internal/adapter"
 )
 
 var markdownImageLinkPattern = regexp.MustCompile(`!\[([^\]]*)\]\(([^)]+)\)`)
-
-// onExecuteChannelPlan은 해당 채널의 큐에 Phase 2 작업을 추가한다.
-func (a *App) onExecuteChannelPlan(channelIndex int) {
-	if a.useV2UI {
-		dialog.ShowInformation("안내", "V2에서는 3차 실행 버튼을 사용해주세요.", a.mainWindow)
-		return
-	}
-
-	ch := a.channels[channelIndex]
-	planPath := ch.CurrentPlanPath
-
-	if planPath == "" {
-		dialog.ShowError(fmt.Errorf("먼저 Phase 1 분석을 실행해주세요"), a.mainWindow)
-		return
-	}
-
-	// plan 파일 존재 확인
-	if _, err := os.Stat(planPath); os.IsNotExist(err) {
-		dialog.ShowError(fmt.Errorf("plan 파일이 존재하지 않습니다: %s", planPath), a.mainWindow)
-		return
-	}
-
-	issueKey := extractIssueKeyFromPath(planPath)
-
-	job := &AnalysisJob{
-		IssueKey:     issueKey,
-		PlanPath:     planPath,
-		AnalysisPath: planPath,
-		MDPath:       strings.TrimSuffix(planPath, "_plan.md") + ".md",
-		Phase:        adapter.PhaseExecute,
-		ChannelIndex: channelIndex,
-	}
-
-	queue := a.queues[channelIndex]
-	queue.Pending = append(queue.Pending, job)
-	if ch.QueueList != nil {
-		ch.QueueList.Refresh()
-	}
-	ch.ExecutePlanBtn.Disable()
-
-	ch.StatusLabel.SetText(fmt.Sprintf("Phase 2 대기열에 추가됨: %s", issueKey))
-
-	if !queue.IsRunning {
-		go a.processQueue(channelIndex)
-	}
-}
 
 // onCopyChannelAnalysis는 해당 채널의 분석 텍스트를 클립보드에 복사한다.
 func (a *App) onCopyChannelAnalysis(channelIndex int) {
@@ -126,10 +78,7 @@ func (a *App) loadJobResultToChannel(job *AnalysisJob) {
 	if mdPath == "" {
 		mdPath = strings.TrimSuffix(job.AnalysisPath, "_plan.md") + ".md"
 		if _, err := os.Stat(mdPath); os.IsNotExist(err) {
-			mdPath = strings.TrimSuffix(job.AnalysisPath, "_execution.md") + ".md"
-			if _, err := os.Stat(mdPath); os.IsNotExist(err) {
-				mdPath = strings.TrimSuffix(job.AnalysisPath, "_analysis.md") + ".md"
-			}
+			mdPath = strings.TrimSuffix(job.AnalysisPath, "_analysis.md") + ".md"
 		}
 	}
 	if mdContent, err := os.ReadFile(mdPath); err == nil {
@@ -172,13 +121,6 @@ func (a *App) loadJobResultToChannel(job *AnalysisJob) {
 	}
 	if ch.CopyAnalysisBtn != nil {
 		ch.CopyAnalysisBtn.Enable()
-	}
-
-	// plan 파일이 있으면 "계획 실행" 버튼 활성화
-	if job.PlanPath != "" {
-		if ch.ExecutePlanBtn != nil {
-			ch.ExecutePlanBtn.Enable()
-		}
 	}
 
 	// AI 분석 탭으로 전환

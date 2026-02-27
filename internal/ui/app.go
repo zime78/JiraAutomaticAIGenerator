@@ -62,7 +62,7 @@ type App struct {
 	v2State *AppV2State
 }
 
-// RunningTask는 V2에서 실행 중인 2차/3차 작업의 런타임 상태를 보관한다.
+// RunningTask는 V2에서 실행 중인 2차 작업의 런타임 상태를 보관한다.
 type RunningTask struct {
 	TaskID          string
 	IssueID         int64
