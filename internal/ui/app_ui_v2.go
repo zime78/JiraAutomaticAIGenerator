@@ -116,15 +116,9 @@ func (a *App) createMainContentV2(v2 *AppV2State) fyne.CanvasObject {
 		fyne.TextStyle{Bold: true},
 	)
 
-	a.stopAllBtn = widget.NewButtonWithIcon("전체 중지", theme.MediaStopIcon(), a.onStopAllQueues)
-	a.stopAllBtn.Importance = widget.DangerImportance
-	if !a.claudeAdapter.IsEnabled() {
-		a.stopAllBtn.Hide()
-	}
-
 	a.statusLabel = widget.NewLabel("준비됨")
 
-	header := container.NewBorder(nil, nil, title, a.stopAllBtn)
+	header := container.NewBorder(nil, nil, title, nil)
 
 	// 사이드바 콜백 설정
 	v2.sidebar.SetOnHistorySelect(func(jobID string) {

@@ -35,7 +35,6 @@ type App struct {
 
 	// UI components (글로벌)
 	statusLabel *widget.Label
-	stopAllBtn  *widget.Button
 	historyList *widget.List
 
 	// 단일 채널 UI 및 상태

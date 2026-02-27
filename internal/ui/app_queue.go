@@ -353,48 +353,6 @@ func (a *App) waitForJobCompletion(job *AnalysisJob) QueueJobOutcome {
 	return QueueJobOutcomeFailed
 }
 
-// onStopAllQueues stops all running and pending jobs
-func (a *App) onStopAllQueues() {
-	stoppedCount := 0
-	queue := a.queue
-	ch := a.channel
-
-	// V2 병렬 실행 작업 중지
-	for _, task := range a.markCancelRunningTasks() {
-		killRunningTask(task)
-		a.markRunningTaskCancelledInDB(task)
-		stoppedCount++
-	}
-
-	// Stop current job
-	if queue.Current != nil {
-		queue.Current.CancelRequested = true
-		if queue.Current.PID > 0 {
-			exec.Command("kill", "-TERM", strconv.Itoa(queue.Current.PID)).Run()
-		} else if queue.Current.ScriptPath != "" {
-			cleaned := filepath.Clean(queue.Current.ScriptPath)
-			if filepath.IsAbs(cleaned) {
-				exec.Command("pkill", "-f", cleaned).Run()
-			}
-		}
-		stoppedCount++
-	}
-
-	// Clear pending jobs
-	stoppedCount += len(queue.Pending)
-	queue.Pending = []*AnalysisJob{}
-	queue.IsRunning = false
-	if ch.QueueList != nil {
-		ch.QueueList.Refresh()
-	}
-	if ch.StatusLabel != nil {
-		ch.StatusLabel.SetText("중지됨")
-	}
-
-	a.statusLabel.SetText(fmt.Sprintf("전체 중지됨 (작업 %d개)", stoppedCount))
-	dialog.ShowInformation("전체 중지", fmt.Sprintf("%d개 작업이 중지되었습니다.", stoppedCount), a.mainWindow)
-}
-
 // extractIssueKeyFromPath는 파일 경로에서 이슈 키를 추출한다.
 func extractIssueKeyFromPath(path string) string {
 	base := filepath.Base(path)
