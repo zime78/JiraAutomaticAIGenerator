@@ -51,29 +51,26 @@ Jira URL 입력 → `ProcessIssueUseCase.Execute()` → Jira 이슈 조회 → �
 | 파일 | 용도 |
 |------|------|
 | `app.go` | App 구조체, 생성자(`NewApp`), 글로벌 상태 필드 |
-| `app_ui.go` | UI 위젯 생성 (`createMainContent`, `createChannelTab`, `createHistoryPanel`) |
-| `app_handlers.go` | 채널별 버튼 이벤트 핸들러 (`onChannelProcess`, `onCopyChannelResult`) |
-| `app_queue.go` | `ChannelState` 구조체, 3채널 독립 큐 관리, Phase 1/2 실행 |
+| `app_ui_v2.go` | V2 UI 생성 (`AppV2State`, 사이드바+메인 패널 레이아웃) |
+| `app_handlers.go` | 버튼 이벤트 핸들러 (`onChannelProcess`, `onCopyChannelResult`) |
+| `app_queue.go` | `ChannelState` 구조체, 단일 큐 관리, Phase 1 실행 |
 | `app_analysis.go` | Claude Code 연동, 완료 결과 로드, 이력 관리 |
 
-### 채널별 완전 독립 워크스페이스
+### 단일 워크스페이스
 
-각 채널(1/2/3)은 완전히 독립된 워크스페이스로 동작:
+앱은 단일 워크스페이스로 동작 (멀티채널 제거됨):
 
-- **독립 항목**: URL 입력, 프로젝트 경로, 분석 시작 버튼, 진행바, 큐, 상태 라벨, 이슈 정보, AI 분석 결과, 내부 서브탭
-- **공유 항목**: 완료 이력(`completedJobs`), 글로벌 상태 라벨, 전체 중지 버튼, `processIssueUC`, `claudeAdapter`(인스턴스 공유하되 공유 상태 변경 없음)
 - **`ClaudeCodeAdapter` 스레드 안전**: `AnalyzeAndGeneratePlan(mdPath, prompt, workDir)`, `ExecutePlan(planPath, workDir)`, `AnalyzeIssue(mdPath, prompt, workDir)` 메서드에 `workDir` 파라미터를 직접 전달 (필수, 빈 값 시 에러). 어댑터에 공유 상태 없음
 
 ### ChannelState 구조체 (`app_queue.go`)
 
 ```go
 type ChannelState struct {
-    Index, Name                              // 채널 식별
-    UrlEntry, ProjectPathEntry, ProcessBtn   // 채널별 입력 위젯
-    ProgressBar, ResultText, AnalysisText    // 채널별 결과 위젯
-    StatusLabel, CopyResultBtn, CopyAnalysisBtn, ExecutePlanBtn
-    QueueList, InnerTabs                     // 큐 목록, [이슈 정보|AI 분석] 서브탭
-    CurrentDoc, CurrentMDPath                // 채널별 상태
+    Index, Name                              // 식별
+    UrlEntry, ProjectPathEntry, ProcessBtn   // 입력 위젯
+    ProgressBar, ResultText                  // 결과 위젯
+    StatusLabel, CopyResultBtn, QueueList    // 상태/큐 위젯
+    CurrentDoc, CurrentMDPath                // 현재 상태
     CurrentAnalysisPath, CurrentPlanPath, CurrentScriptPath
 }
 ```
@@ -111,8 +108,6 @@ prompt_template = 다음 Jira 이슈를 분석하고 수정 코드를 작성해�
 
 [claude]
 cli_path = claude
-project_path_1 = /path/to/project1   # 채널 1 프로젝트 경로 (필수)
-project_path_2 = /path/to/project2   # 채널 2 프로젝트 경로 (필수)
-project_path_3 = /path/to/project3   # 채널 3 프로젝트 경로 (필수)
+project_path_1 = /path/to/project   # 프로젝트 경로 (필수)
 enabled = true
 ```

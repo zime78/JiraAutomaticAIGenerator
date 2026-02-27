@@ -17,24 +17,24 @@ import (
 	"jira-ai-generator/internal/ui/state"
 )
 
-// ChannelState는 각 채널의 독립적인 UI 및 상태를 관리한다.
+// ChannelState는 UI 및 상태를 관리한다.
 type ChannelState struct {
 	Index int
 	Name  string
 
-	// 채널별 입력 위젯
+	// 입력 위젯
 	UrlEntry         *widget.Entry
 	ProjectPathEntry *widget.Entry
 	ProcessBtn       *widget.Button
 	ProgressBar      *widget.ProgressBar
 
-	// 채널별 결과 위젯
+	// 결과 위젯
 	ResultText    *widget.Entry
 	StatusLabel   *widget.Label
 	CopyResultBtn *widget.Button
 	QueueList     *widget.List
 
-	// 채널별 상태
+	// 상태
 	CurrentDoc          *domain.GeneratedDocument
 	CurrentMDPath       string
 	CurrentAnalysisPath string
@@ -47,13 +47,12 @@ type AnalysisJob struct {
 	IssueKey        string
 	ScriptPath      string
 	AnalysisPath    string
-	PlanPath string // Phase 1 결과: _plan.md 경로
-	LogPath  string // 로그 파일 경로
+	PlanPath        string // Phase 1 결과: _plan.md 경로
+	LogPath         string // 로그 파일 경로
 	MDPath          string
 	StartTime       string
 	PID             int
 	Phase           adapter.AnalysisPhase // 현재 실행 단계
-	ChannelIndex    int                   // 실행된 채널 인덱스
 	CancelRequested bool                  // 사용자 중단 요청 여부
 	Outcome         QueueJobOutcome       // 마지막 실행 결과
 }
@@ -70,7 +69,7 @@ const (
 	QueueJobOutcomeCancelled
 )
 
-// AnalysisQueue represents a queue channel for sequential processing
+// AnalysisQueue represents a queue for sequential processing
 type AnalysisQueue struct {
 	Name      string
 	Current   *AnalysisJob
@@ -99,9 +98,9 @@ func recordQueueJobByOutcome(queue *AnalysisQueue, job *AnalysisJob, outcome Que
 	}
 }
 
-// addToQueue adds the current issue to a specific queue
-func (a *App) addToQueue(channelIndex int) {
-	ch := a.channels[channelIndex]
+// addToQueue adds the current issue to the queue
+func (a *App) addToQueue() {
+	ch := a.channel
 
 	if ch.CurrentDoc == nil || ch.CurrentMDPath == "" {
 		dialog.ShowError(fmt.Errorf("먼저 이슈를 분석해주세요"), a.mainWindow)
@@ -116,18 +115,16 @@ func (a *App) addToQueue(channelIndex int) {
 
 	issueKey := ch.CurrentDoc.IssueKey
 
-	// 전체 큐에서 동일 이슈 중복 체크
-	for i := 0; i < 3; i++ {
-		q := a.queues[i]
-		if q.Current != nil && q.Current.IssueKey == issueKey {
-			dialog.ShowInformation("알림", fmt.Sprintf("%s이(가) %s에서 이미 실행 중입니다.", issueKey, q.Name), a.mainWindow)
+	// 큐에서 동일 이슈 중복 체크
+	q := a.queue
+	if q.Current != nil && q.Current.IssueKey == issueKey {
+		dialog.ShowInformation("알림", fmt.Sprintf("%s이(가) 이미 실행 중입니다.", issueKey), a.mainWindow)
+		return
+	}
+	for _, p := range q.Pending {
+		if p.IssueKey == issueKey {
+			dialog.ShowInformation("알림", fmt.Sprintf("%s이(가) 이미 대기 중입니다.", issueKey), a.mainWindow)
 			return
-		}
-		for _, p := range q.Pending {
-			if p.IssueKey == issueKey {
-				dialog.ShowInformation("알림", fmt.Sprintf("%s이(가) %s에 이미 대기 중입니다.", issueKey, q.Name), a.mainWindow)
-				return
-			}
 		}
 	}
 
@@ -138,29 +135,27 @@ func (a *App) addToQueue(channelIndex int) {
 		AnalysisPath: strings.TrimSuffix(ch.CurrentMDPath, ".md") + "_plan.md",
 		ScriptPath:   strings.TrimSuffix(ch.CurrentMDPath, ".md") + "_plan_run.sh",
 		Phase:        adapter.PhaseAnalyze,
-		ChannelIndex: channelIndex,
 	}
 
-	queue := a.queues[channelIndex]
-	queue.Pending = append(queue.Pending, job)
+	a.queue.Pending = append(a.queue.Pending, job)
 	ch.QueueList.Refresh()
 
-	ch.StatusLabel.SetText(fmt.Sprintf("%s에 %s 추가됨 (대기: %d)", queue.Name, job.IssueKey, len(queue.Pending)))
+	ch.StatusLabel.SetText(fmt.Sprintf("%s에 %s 추가됨 (대기: %d)", a.queue.Name, job.IssueKey, len(a.queue.Pending)))
 
 	// If not running, start processing
-	if !queue.IsRunning {
-		go a.processQueue(channelIndex)
+	if !a.queue.IsRunning {
+		go a.processQueue()
 	}
 }
 
-// stopQueueCurrent stops the current running job in a queue
-func (a *App) stopQueueCurrent(channelIndex int) {
-	queue := a.queues[channelIndex]
-	ch := a.channels[channelIndex]
+// stopQueueCurrent stops the current running job in the queue
+func (a *App) stopQueueCurrent() {
+	queue := a.queue
+	ch := a.channel
 	stopped := 0
 
 	// V2 실행 중인 작업 취소
-	for _, task := range a.markCancelRunningTasks(channelIndex) {
+	for _, task := range a.markCancelRunningTasks() {
 		killRunningTask(task)
 		a.markRunningTaskCancelledInDB(task)
 		stopped++
@@ -168,7 +163,7 @@ func (a *App) stopQueueCurrent(channelIndex int) {
 
 	if queue.Current == nil {
 		if stopped > 0 {
-			ch.StatusLabel.SetText(fmt.Sprintf("채널 %d 중지 요청됨 (%d개 실행)", channelIndex+1, stopped))
+			ch.StatusLabel.SetText(fmt.Sprintf("중지 요청됨 (%d개 실행)", stopped))
 		}
 		return
 	}
@@ -191,10 +186,10 @@ func (a *App) stopQueueCurrent(channelIndex int) {
 	ch.QueueList.Refresh()
 }
 
-// processQueue processes jobs in a queue sequentially
-func (a *App) processQueue(channelIndex int) {
-	queue := a.queues[channelIndex]
-	ch := a.channels[channelIndex]
+// processQueue processes jobs in the queue sequentially
+func (a *App) processQueue() {
+	queue := a.queue
+	ch := a.channel
 
 	for len(queue.Pending) > 0 {
 		if queue.IsRunning {
@@ -211,7 +206,7 @@ func (a *App) processQueue(channelIndex int) {
 		fmt.Printf("[Queue] %s: Phase 1 시작 - %s\n", queue.Name, job.IssueKey)
 		ch.StatusLabel.SetText(fmt.Sprintf("%s: %s Phase 1 시작", queue.Name, job.IssueKey))
 
-		outcome := a.executePhase1(channelIndex, job)
+		outcome := a.executePhase1(job)
 
 		// 실행 결과에 따라 상태별 목록에 기록한다.
 		recordQueueJobByOutcome(queue, job, outcome)
@@ -231,8 +226,8 @@ func (a *App) processQueue(channelIndex int) {
 }
 
 // executePhase1은 Phase 1: 읽기 전용 분석을 실행한다.
-func (a *App) executePhase1(channelIndex int, job *AnalysisJob) QueueJobOutcome {
-	ch := a.channels[channelIndex]
+func (a *App) executePhase1(job *AnalysisJob) QueueJobOutcome {
+	ch := a.channel
 
 	// 기존 plan 파일 삭제
 	os.Remove(job.PlanPath)
@@ -241,7 +236,7 @@ func (a *App) executePhase1(channelIndex int, job *AnalysisJob) QueueJobOutcome 
 	projectPath := strings.TrimSpace(ch.ProjectPathEntry.Text)
 	result, err := a.claudeAdapter.AnalyzeAndGeneratePlan(job.MDPath, prompt, projectPath)
 	if err != nil {
-		fmt.Printf("[Queue] %s: 오류 - %s: %v\n", a.queues[channelIndex].Name, job.IssueKey, err)
+		fmt.Printf("[Queue] %s: 오류 - %s: %v\n", a.queue.Name, job.IssueKey, err)
 		ch.StatusLabel.SetText(fmt.Sprintf("오류: %s - %v", job.IssueKey, err))
 		return QueueJobOutcomeFailed
 	}
@@ -253,7 +248,7 @@ func (a *App) executePhase1(channelIndex int, job *AnalysisJob) QueueJobOutcome 
 	job.LogPath = result.LogPath
 	job.Phase = adapter.PhaseAnalyze
 
-	// 채널별 상태 업데이트
+	// 상태 업데이트
 	ch.CurrentAnalysisPath = result.PlanPath
 	ch.CurrentPlanPath = result.PlanPath
 	ch.CurrentScriptPath = result.ScriptPath
@@ -261,19 +256,19 @@ func (a *App) executePhase1(channelIndex int, job *AnalysisJob) QueueJobOutcome 
 	ch.QueueList.Refresh()
 
 	// Wait for completion
-	return a.waitForJobCompletion(channelIndex, job)
+	return a.waitForJobCompletion(job)
 }
 
 // waitForJobCompletion waits for a job to complete while displaying progress
-func (a *App) waitForJobCompletion(channelIndex int, job *AnalysisJob) QueueJobOutcome {
+func (a *App) waitForJobCompletion(job *AnalysisJob) QueueJobOutcome {
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 
 	startTime := time.Now()
 	var lastLogSize int64
 
-	ch := a.channels[channelIndex]
-	queueName := a.queues[channelIndex].Name
+	ch := a.channel
+	queueName := a.queue.Name
 
 	for range ticker.C {
 		elapsed := time.Since(startTime).Round(time.Second)
@@ -306,7 +301,7 @@ func (a *App) waitForJobCompletion(channelIndex int, job *AnalysisJob) QueueJobO
 				return QueueJobOutcomeFailed
 			}
 			if a.v2State != nil {
-				a.v2State.resultPanels[channelIndex].SetIssueInfo(string(content))
+				a.v2State.resultPanel.SetIssueInfo(string(content))
 			}
 
 			if job.PlanPath != "" {
@@ -358,39 +353,42 @@ func (a *App) waitForJobCompletion(channelIndex int, job *AnalysisJob) QueueJobO
 	return QueueJobOutcomeFailed
 }
 
-// onStopAllQueues stops all running and pending jobs in all queues
+// onStopAllQueues stops all running and pending jobs
 func (a *App) onStopAllQueues() {
 	stoppedCount := 0
-	for i := 0; i < 3; i++ {
-		queue := a.queues[i]
-		ch := a.channels[i]
+	queue := a.queue
+	ch := a.channel
 
-		// V2 병렬 실행 작업 중지
-		for _, task := range a.markCancelRunningTasks(i) {
-			killRunningTask(task)
-			a.markRunningTaskCancelledInDB(task)
-			stoppedCount++
-		}
+	// V2 병렬 실행 작업 중지
+	for _, task := range a.markCancelRunningTasks() {
+		killRunningTask(task)
+		a.markRunningTaskCancelledInDB(task)
+		stoppedCount++
+	}
 
-		// Stop current job
-		if queue.Current != nil {
-			// 현재 실행 중 작업은 중단 요청 상태로 표시한다.
-			queue.Current.CancelRequested = true
-			cmd := exec.Command("pkill", "-f", queue.Current.ScriptPath)
-			cmd.Run()
-			stoppedCount++
+	// Stop current job
+	if queue.Current != nil {
+		queue.Current.CancelRequested = true
+		if queue.Current.PID > 0 {
+			exec.Command("kill", "-TERM", strconv.Itoa(queue.Current.PID)).Run()
+		} else if queue.Current.ScriptPath != "" {
+			cleaned := filepath.Clean(queue.Current.ScriptPath)
+			if filepath.IsAbs(cleaned) {
+				exec.Command("pkill", "-f", cleaned).Run()
+			}
 		}
+		stoppedCount++
+	}
 
-		// Clear pending jobs
-		stoppedCount += len(queue.Pending)
-		queue.Pending = []*AnalysisJob{}
-		queue.IsRunning = false
-		if ch.QueueList != nil {
-			ch.QueueList.Refresh()
-		}
-		if ch.StatusLabel != nil {
-			ch.StatusLabel.SetText("중지됨")
-		}
+	// Clear pending jobs
+	stoppedCount += len(queue.Pending)
+	queue.Pending = []*AnalysisJob{}
+	queue.IsRunning = false
+	if ch.QueueList != nil {
+		ch.QueueList.Refresh()
+	}
+	if ch.StatusLabel != nil {
+		ch.StatusLabel.SetText("중지됨")
 	}
 
 	a.statusLabel.SetText(fmt.Sprintf("전체 중지됨 (작업 %d개)", stoppedCount))
@@ -414,4 +412,89 @@ func mapAdapterPhaseToStatePhase(adapterPhase adapter.AnalysisPhase) state.Proce
 	default:
 		return state.PhaseIdle
 	}
+}
+
+// queueListItemView는 큐 목록 한 줄에 표시할 아이콘/텍스트를 표현한다.
+type queueListItemView struct {
+	Icon string
+	Text string
+}
+
+// queueListItemCount는 큐 목록에 표시할 전체 아이템 수를 반환한다.
+func queueListItemCount(q *AnalysisQueue) int {
+	if q == nil {
+		return 0
+	}
+
+	count := len(q.Pending) + len(q.Completed) + len(q.Failed) + len(q.Cancelled)
+	if q.Current != nil {
+		count++
+	}
+	return count
+}
+
+// resolveQueueListItemView는 인덱스에 해당하는 큐 아이템의 표시 정보를 계산한다.
+// 표시 순서는 Current -> Pending -> Completed -> Failed -> Cancelled 이다.
+func resolveQueueListItemView(q *AnalysisQueue, id int) (queueListItemView, bool) {
+	if q == nil || id < 0 {
+		return queueListItemView{}, false
+	}
+
+	currentCount := 0
+	if q.Current != nil {
+		currentCount = 1
+	}
+
+	if id == 0 && q.Current != nil {
+		return queueListItemView{
+			Icon: "▶",
+			Text: q.Current.IssueKey,
+		}, true
+	}
+
+	pendingCount := len(q.Pending)
+	if id < currentCount+pendingCount {
+		pendingIdx := id - currentCount
+		if pendingIdx >= 0 && pendingIdx < len(q.Pending) {
+			return queueListItemView{
+				Icon: "⏳",
+				Text: q.Pending[pendingIdx].IssueKey,
+			}, true
+		}
+	}
+
+	completedStart := currentCount + pendingCount
+	if id < completedStart+len(q.Completed) {
+		completedIdx := id - completedStart
+		if completedIdx >= 0 && completedIdx < len(q.Completed) {
+			return queueListItemView{
+				Icon: "✓",
+				Text: q.Completed[completedIdx].IssueKey + " (완료)",
+			}, true
+		}
+	}
+
+	failedStart := completedStart + len(q.Completed)
+	if id < failedStart+len(q.Failed) {
+		failedIdx := id - failedStart
+		if failedIdx >= 0 && failedIdx < len(q.Failed) {
+			return queueListItemView{
+				Icon: "✗",
+				Text: q.Failed[failedIdx].IssueKey + " (실패)",
+			}, true
+		}
+	}
+
+	cancelledStart := failedStart + len(q.Failed)
+	if id < cancelledStart+len(q.Cancelled) {
+		cancelledIdx := id - cancelledStart
+		if cancelledIdx >= 0 && cancelledIdx < len(q.Cancelled) {
+			return queueListItemView{
+				Icon: "⏹",
+				Text: q.Cancelled[cancelledIdx].IssueKey + " (중단)",
+			}, true
+		}
+	}
+
+	return queueListItemView{}, false
 }

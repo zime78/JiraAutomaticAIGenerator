@@ -13,11 +13,11 @@ import (
 
 var markdownImageLinkPattern = regexp.MustCompile(`!\[([^\]]*)\]\(([^)]+)\)`)
 
-// onCopyChannelAnalysis는 해당 채널의 분석 텍스트를 클립보드에 복사한다.
-func (a *App) onCopyChannelAnalysis(channelIndex int) {
+// onCopyChannelAnalysis는 분석 텍스트를 클립보드에 복사한다.
+func (a *App) onCopyChannelAnalysis() {
 	analysisContent := ""
 	if a.v2State != nil {
-		analysisContent = a.v2State.resultPanels[channelIndex].GetIssueInfo()
+		analysisContent = a.v2State.resultPanel.GetIssueInfo()
 	}
 	if analysisContent == "" {
 		return
@@ -28,9 +28,9 @@ func (a *App) onCopyChannelAnalysis(channelIndex int) {
 	dialog.ShowInformation("완료", "분석 결과가 복사되었습니다.", a.mainWindow)
 }
 
-// onRefreshChannelAnalysis는 해당 채널의 분석 결과 파일을 다시 읽는다.
-func (a *App) onRefreshChannelAnalysis(channelIndex int) {
-	ch := a.channels[channelIndex]
+// onRefreshChannelAnalysis는 분석 결과 파일을 다시 읽는다.
+func (a *App) onRefreshChannelAnalysis() {
+	ch := a.channel
 	path := ch.CurrentAnalysisPath
 
 	if path == "" {
@@ -45,23 +45,14 @@ func (a *App) onRefreshChannelAnalysis(channelIndex int) {
 	}
 
 	if a.v2State != nil {
-		a.v2State.resultPanels[channelIndex].SetIssueInfo(string(content))
+		a.v2State.resultPanel.SetIssueInfo(string(content))
 	}
 	ch.StatusLabel.SetText(fmt.Sprintf("분석 결과 새로고침 완료: %s", path))
 }
 
-// loadJobResultToChannel은 완료된 작업의 결과를 해당 채널에 로드한다.
+// loadJobResultToChannel은 완료된 작업의 결과를 로드한다.
 func (a *App) loadJobResultToChannel(job *AnalysisJob) {
-	channelIndex := job.ChannelIndex
-	if channelIndex < 0 || channelIndex >= 3 {
-		channelIndex = 0
-	}
-	ch := a.channels[channelIndex]
-
-	// 해당 채널 탭으로 전환
-	if a.tabs != nil {
-		a.tabs.SelectIndex(channelIndex)
-	}
+	ch := a.channel
 
 	// AI 분석 결과 로드 (plan 파일 우선)
 	analysisPath := job.AnalysisPath
@@ -81,7 +72,7 @@ func (a *App) loadJobResultToChannel(job *AnalysisJob) {
 		}
 		if mdContent, readErr := os.ReadFile(mdPath); readErr == nil {
 			if a.v2State != nil {
-				a.v2State.resultPanels[channelIndex].SetIssueInfo(string(mdContent))
+				a.v2State.resultPanel.SetIssueInfo(string(mdContent))
 			}
 			ch.CurrentMDPath = mdPath
 		}
@@ -89,7 +80,7 @@ func (a *App) loadJobResultToChannel(job *AnalysisJob) {
 	}
 
 	if a.v2State != nil {
-		a.v2State.resultPanels[channelIndex].SetIssueInfo(string(content))
+		a.v2State.resultPanel.SetIssueInfo(string(content))
 	}
 	ch.CurrentAnalysisPath = analysisPath
 	ch.CurrentScriptPath = job.ScriptPath
@@ -97,7 +88,7 @@ func (a *App) loadJobResultToChannel(job *AnalysisJob) {
 		ch.CurrentPlanPath = job.PlanPath
 	}
 
-	a.statusLabel.SetText(fmt.Sprintf("결과 로드됨: %s → %s", job.IssueKey, ch.Name))
+	a.statusLabel.SetText(fmt.Sprintf("결과 로드됨: %s", job.IssueKey))
 }
 
 // loadPreviousAnalysis는 output 폴더에서 기존 분석 결과를 스캔한다.
@@ -164,7 +155,6 @@ func (a *App) loadPreviousAnalysis() {
 			PlanPath:     resultPlanPath,
 			MDPath:       mdPath,
 			StartTime:    timeStr,
-			ChannelIndex: 0, // 기본: 채널 1
 		}
 		a.completedJobs = append(a.completedJobs, job)
 	}

@@ -9,9 +9,9 @@ import (
 	"jira-ai-generator/internal/adapter"
 )
 
-// onChannelProcess는 해당 채널에서 이슈 분석을 시작한다.
-func (a *App) onChannelProcess(channelIndex int) {
-	ch := a.channels[channelIndex]
+// onChannelProcess는 이슈 분석을 시작한다.
+func (a *App) onChannelProcess() {
+	ch := a.channel
 	url := strings.TrimSpace(ch.UrlEntry.Text)
 	if url == "" {
 		dialog.ShowError(fmt.Errorf("Jira URL을 입력해주세요"), a.mainWindow)
@@ -38,18 +38,17 @@ func (a *App) onChannelProcess(channelIndex int) {
 	ch.CurrentPlanPath = ""
 	ch.CurrentScriptPath = ""
 
-	go a.processIssue(issueKey, channelIndex)
+	go a.processIssue(issueKey)
 }
 
-// processIssue는 채널별로 이슈를 처리한다.
-func (a *App) processIssue(issueKey string, channelIndex int) {
-	ch := a.channels[channelIndex]
+// processIssue는 이슈를 처리한다.
+func (a *App) processIssue(issueKey string) {
+	ch := a.channel
 	defer func() {
 		ch.ProcessBtn.Enable()
 		ch.ProgressBar.Hide()
 	}()
 
-	// Use UseCase to process the issue
 	result, err := a.processIssueUC.Execute(issueKey, func(progress float64, status string) {
 		ch.ProgressBar.SetValue(progress)
 		ch.StatusLabel.SetText(status)
@@ -67,9 +66,9 @@ func (a *App) processIssue(issueKey string, channelIndex int) {
 	ch.CopyResultBtn.Enable()
 }
 
-// onCopyChannelResult는 해당 채널의 이슈 결과를 클립보드에 복사한다.
-func (a *App) onCopyChannelResult(channelIndex int) {
-	ch := a.channels[channelIndex]
+// onCopyChannelResult는 이슈 결과를 클립보드에 복사한다.
+func (a *App) onCopyChannelResult() {
+	ch := a.channel
 	if ch.CurrentDoc == nil {
 		return
 	}

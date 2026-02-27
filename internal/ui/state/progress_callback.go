@@ -15,40 +15,38 @@ type ProgressReporter interface {
 	ReportError(err error)
 }
 
-// ChannelProgressReporter 채널별 진행률 리포터
+// ChannelProgressReporter 진행률 리포터
 type ChannelProgressReporter struct {
-	channelIndex int
-	appState     *AppState
-	source       string
+	appState *AppState
+	source   string
 }
 
-// NewChannelProgressReporter 새 채널 진행률 리포터 생성
+// NewChannelProgressReporter 새 진행률 리포터 생성 (channelIndex는 하위 호환용으로 무시)
 func NewChannelProgressReporter(channelIndex int, appState *AppState, source string) *ChannelProgressReporter {
 	return &ChannelProgressReporter{
-		channelIndex: channelIndex,
-		appState:     appState,
-		source:       source,
+		appState: appState,
+		source:   source,
 	}
 }
 
 // ReportProgress 진행률 보고 구현
 func (r *ChannelProgressReporter) ReportProgress(phase ProcessPhase, step, total int, message string) {
-	r.appState.UpdateProgress(r.channelIndex, step, total, message)
+	r.appState.UpdateProgress(0, step, total, message)
 }
 
 // ReportPhaseChange 단계 변경 보고 구현
 func (r *ChannelProgressReporter) ReportPhaseChange(phase ProcessPhase) {
-	r.appState.UpdatePhase(r.channelIndex, phase)
+	r.appState.UpdatePhase(0, phase)
 }
 
 // ReportLog 로그 보고 구현
 func (r *ChannelProgressReporter) ReportLog(level LogLevel, message string) {
-	r.appState.AddLog(r.channelIndex, level, message, r.source)
+	r.appState.AddLog(level, message, r.source)
 }
 
 // ReportError 에러 보고 구현
 func (r *ChannelProgressReporter) ReportError(err error) {
-	r.appState.AddLog(r.channelIndex, LogError, err.Error(), r.source)
+	r.appState.AddLog(LogError, err.Error(), r.source)
 }
 
 // ToCallback ProgressCallback 함수로 변환

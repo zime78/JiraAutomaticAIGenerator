@@ -13,8 +13,8 @@ func TestNewAppState(t *testing.T) {
 		t.Fatal("NewAppState returned nil")
 	}
 
-	if len(state.Channels) != 3 {
-		t.Errorf("expected 3 channels, got %d", len(state.Channels))
+	if state.Channel == nil {
+		t.Error("Channel not initialized")
 	}
 
 	if state.EventBus == nil {
@@ -46,44 +46,15 @@ func TestNewChannelStateData(t *testing.T) {
 func TestAppState_GetChannel(t *testing.T) {
 	state := NewAppState(nil, nil)
 
-	ch := state.GetChannel(1)
+	ch := state.GetChannel(0)
 	if ch == nil {
-		t.Fatal("GetChannel(1) returned nil")
-	}
-	if ch.Index != 1 {
-		t.Errorf("expected index 1, got %d", ch.Index)
+		t.Fatal("GetChannel(0) returned nil")
 	}
 
-	// 범위 밖 인덱스
-	if state.GetChannel(-1) != nil {
-		t.Error("GetChannel(-1) should return nil")
-	}
-	if state.GetChannel(3) != nil {
-		t.Error("GetChannel(3) should return nil")
-	}
-}
-
-func TestAppState_SetActiveChannel(t *testing.T) {
-	state := NewAppState(nil, nil)
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-
-	var receivedChannel int
-	state.EventBus.Subscribe(EventChannelSwitch, func(event Event) {
-		receivedChannel = event.Channel
-		wg.Done()
-	})
-
-	state.SetActiveChannel(2)
-
-	wg.Wait()
-
-	if state.ActiveChannel != 2 {
-		t.Errorf("expected ActiveChannel 2, got %d", state.ActiveChannel)
-	}
-	if receivedChannel != 2 {
-		t.Errorf("expected event channel 2, got %d", receivedChannel)
+	// 인덱스와 무관하게 단일 채널을 반환한다
+	ch2 := state.GetChannel(1)
+	if ch2 != ch {
+		t.Error("GetChannel should return the same channel regardless of index")
 	}
 }
 
@@ -158,11 +129,11 @@ func TestAppState_AddLog(t *testing.T) {
 		wg.Done()
 	})
 
-	state.AddLog(1, LogInfo, "테스트 로그", "test")
+	state.AddLog(LogInfo, "테스트 로그", "test")
 
 	wg.Wait()
 
-	ch := state.GetChannel(1)
+	ch := state.GetChannel(0)
 	if len(ch.Logs) != 1 {
 		t.Errorf("expected 1 log, got %d", len(ch.Logs))
 	}
@@ -185,7 +156,7 @@ func TestAppState_AddJob(t *testing.T) {
 		ID:       "job-1",
 		IssueKey: "TEST-123",
 	}
-	state.AddJob(0, job)
+	state.AddJob(job)
 
 	wg.Wait()
 
@@ -202,12 +173,12 @@ func TestAppState_CompleteJob(t *testing.T) {
 	state := NewAppState(nil, nil)
 
 	// 현재 작업 설정
-	state.Channels[0].CurrentJob = &JobData{
+	state.Channel.CurrentJob = &JobData{
 		ID:       "job-1",
 		IssueKey: "TEST-123",
 		Status:   JobRunning,
 	}
-	state.Channels[0].IsRunning = true
+	state.Channel.IsRunning = true
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -219,7 +190,7 @@ func TestAppState_CompleteJob(t *testing.T) {
 		wg.Done()
 	})
 
-	state.CompleteJob(0, "job-1", nil)
+	state.CompleteJob("job-1", nil)
 
 	wg.Wait()
 
@@ -239,14 +210,14 @@ func TestAppState_FailJob(t *testing.T) {
 	state := NewAppState(nil, nil)
 
 	// 현재 작업 설정
-	state.Channels[0].CurrentJob = &JobData{
+	state.Channel.CurrentJob = &JobData{
 		ID:       "job-1",
 		IssueKey: "TEST-123",
 		Status:   JobRunning,
 	}
-	state.Channels[0].IsRunning = true
-	state.Channels[0].Phase = PhaseAnalyzing
-	state.Channels[0].Steps[4].Status = StepRunning
+	state.Channel.IsRunning = true
+	state.Channel.Phase = PhaseAnalyzing
+	state.Channel.Steps[4].Status = StepRunning
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -256,7 +227,7 @@ func TestAppState_FailJob(t *testing.T) {
 	})
 
 	testErr := errors.New("테스트 에러")
-	state.FailJob(0, "job-1", testErr)
+	state.FailJob("job-1", testErr)
 
 	wg.Wait()
 
@@ -285,7 +256,7 @@ func TestAppState_ResetChannel(t *testing.T) {
 	ch.IssueInfo = "테스트 정보"
 
 	// 리셋
-	state.ResetChannel(0)
+	state.ResetChannel()
 
 	ch = state.GetChannel(0)
 	if ch.Phase != PhaseIdle {
@@ -304,20 +275,20 @@ func TestAppState_ConcurrentAccess(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	// 동시에 여러 채널 업데이트
+	// 동시에 여러 업데이트
 	for i := 0; i < 100; i++ {
 		wg.Add(3)
 		go func(i int) {
 			defer wg.Done()
-			state.UpdatePhase(i%3, ProcessPhase((i%7)+1))
+			state.UpdatePhase(0, ProcessPhase((i%7)+1))
 		}(i)
 		go func(i int) {
 			defer wg.Done()
-			state.AddLog(i%3, LogInfo, "로그", "test")
+			state.AddLog(LogInfo, "로그", "test")
 		}(i)
 		go func(i int) {
 			defer wg.Done()
-			state.UpdateProgress(i%3, i, 100, "진행 중")
+			state.UpdateProgress(0, i, 100, "진행 중")
 		}(i)
 	}
 

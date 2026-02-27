@@ -46,15 +46,9 @@ func (a *App) showSettingsDialog() {
 	outputDirEntry := widget.NewEntry()
 	outputDirEntry.SetText(a.config.Output.Dir)
 
-	// 채널별 프로젝트 경로
-	projectPath1Entry := widget.NewEntry()
-	projectPath1Entry.SetText(a.config.Claude.ChannelPaths[0])
-
-	projectPath2Entry := widget.NewEntry()
-	projectPath2Entry.SetText(a.config.Claude.ChannelPaths[1])
-
-	projectPath3Entry := widget.NewEntry()
-	projectPath3Entry.SetText(a.config.Claude.ChannelPaths[2])
+	// 프로젝트 경로 (단일)
+	projectPathEntry := widget.NewEntry()
+	projectPathEntry.SetText(a.config.Claude.ProjectPath)
 
 	// 설정 파일 경로
 	configPath := config.GetConfigPath()
@@ -72,9 +66,7 @@ func (a *App) showSettingsDialog() {
 		widget.NewFormItem("", widget.NewSeparator()),
 		widget.NewFormItem("출력 디렉토리", outputDirEntry),
 		widget.NewFormItem("", widget.NewSeparator()),
-		widget.NewFormItem("채널 1 프로젝트", projectPath1Entry),
-		widget.NewFormItem("채널 2 프로젝트", projectPath2Entry),
-		widget.NewFormItem("채널 3 프로젝트", projectPath3Entry),
+		widget.NewFormItem("프로젝트 경로", projectPathEntry),
 	)
 
 	// 버튼
@@ -96,15 +88,11 @@ func (a *App) showSettingsDialog() {
 			a.claudeAdapter.SetModel(modelSelect.Selected)
 			a.claudeAdapter.SetHookScriptPath(hookScriptEntry.Text)
 		}
-		a.config.Claude.ChannelPaths[0] = projectPath1Entry.Text
-		a.config.Claude.ChannelPaths[1] = projectPath2Entry.Text
-		a.config.Claude.ChannelPaths[2] = projectPath3Entry.Text
+		a.config.Claude.ProjectPath = projectPathEntry.Text
 
 		// 채널 UI 업데이트
-		for i, ch := range a.channels {
-			if ch != nil && ch.ProjectPathEntry != nil {
-				ch.ProjectPathEntry.SetText(a.config.Claude.ChannelPaths[i])
-			}
+		if a.channel != nil && a.channel.ProjectPathEntry != nil {
+			a.channel.ProjectPathEntry.SetText(a.config.Claude.ProjectPath)
 		}
 
 		// 파일에 저장
@@ -140,10 +128,10 @@ func (a *App) showSettingsDialog() {
 
 	// 스크롤 가능한 컨테이너 (창이 작아지면 스크롤)
 	scroll := container.NewScroll(content)
-	scroll.SetMinSize(fyne.NewSize(650, 700))
+	scroll.SetMinSize(fyne.NewSize(650, 600))
 
 	// 커스텀 다이얼로그 생성 (타이틀은 내부 헤더에 포함)
 	settingsDialog = dialog.NewCustom("", "닫기", scroll, a.mainWindow)
-	settingsDialog.Resize(fyne.NewSize(750, 780))
+	settingsDialog.Resize(fyne.NewSize(750, 680))
 	settingsDialog.Show()
 }

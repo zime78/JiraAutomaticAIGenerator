@@ -1,7 +1,6 @@
 package components
 
 import (
-	"fmt"
 	"image/color"
 
 	"fyne.io/fyne/v2"
@@ -23,15 +22,15 @@ type StatusBar struct {
 	globalStatus *widget.Label
 	globalIcon   *canvas.Text
 
-	// 채널별 상태 인디케이터
-	channelIndicators [3]*ChannelIndicator
+	// 상태 인디케이터 (단일 채널)
+	statusIndicator *StatusIndicator
 
 	// 최근 활동
 	recentActivity *widget.Label
 }
 
-// ChannelIndicator 채널 상태 인디케이터
-type ChannelIndicator struct {
+// StatusIndicator 상태 인디케이터
+type StatusIndicator struct {
 	widget.BaseWidget
 
 	container *fyne.Container
@@ -43,27 +42,15 @@ type ChannelIndicator struct {
 // NewStatusBar 새 StatusBar 생성
 func NewStatusBar() *StatusBar {
 	sb := &StatusBar{
-		globalStatus:   widget.NewLabel("준비됨"),
-		globalIcon:     canvas.NewText("●", color.RGBA{R: 34, G: 197, B: 94, A: 255}),
-		recentActivity: widget.NewLabel(""),
+		globalStatus:    widget.NewLabel("준비됨"),
+		globalIcon:      canvas.NewText("●", color.RGBA{R: 34, G: 197, B: 94, A: 255}),
+		statusIndicator: NewStatusIndicator(),
+		recentActivity:  widget.NewLabel(""),
 	}
 
 	sb.globalIcon.TextSize = 12
 
-	// 채널 인디케이터 생성
-	for i := 0; i < 3; i++ {
-		sb.channelIndicators[i] = NewChannelIndicator(i)
-	}
-
 	// 레이아웃 구성
-	channelSection := container.NewHBox(
-		sb.channelIndicators[0],
-		widget.NewSeparator(),
-		sb.channelIndicators[1],
-		widget.NewSeparator(),
-		sb.channelIndicators[2],
-	)
-
 	globalSection := container.NewHBox(
 		sb.globalIcon,
 		sb.globalStatus,
@@ -79,7 +66,7 @@ func NewStatusBar() *StatusBar {
 				nil, nil,
 				globalSection,
 				sb.recentActivity,
-				channelSection,
+				sb.statusIndicator,
 			),
 		),
 	)
@@ -109,12 +96,10 @@ func (sb *StatusBar) SetGlobalStatus(status string, isError bool) {
 	})
 }
 
-// SetChannelStatus 채널 상태 설정
-func (sb *StatusBar) SetChannelStatus(channelIndex int, phase state.ProcessPhase) {
+// SetChannelStatus 상태 설정 (단일 채널)
+func (sb *StatusBar) SetChannelStatus(phase state.ProcessPhase) {
 	fyne.Do(func() {
-		if channelIndex >= 0 && channelIndex < 3 {
-			sb.channelIndicators[channelIndex].SetStatus(phase)
-		}
+		sb.statusIndicator.SetStatus(phase)
 	})
 }
 
@@ -127,44 +112,42 @@ func (sb *StatusBar) SetRecentActivity(activity string) {
 func (sb *StatusBar) UpdateFromState(appState *state.AppState) {
 	sb.SetGlobalStatus(appState.GlobalStatus, false)
 
-	for i := 0; i < 3; i++ {
-		ch := appState.GetChannel(i)
-		if ch != nil {
-			sb.SetChannelStatus(i, ch.Phase)
-		}
+	ch := appState.GetActiveChannel()
+	if ch != nil {
+		sb.SetChannelStatus(ch.Phase)
 	}
 }
 
-// NewChannelIndicator 새 채널 인디케이터 생성
-func NewChannelIndicator(index int) *ChannelIndicator {
-	ci := &ChannelIndicator{
+// NewStatusIndicator 새 상태 인디케이터 생성
+func NewStatusIndicator() *StatusIndicator {
+	si := &StatusIndicator{
 		icon:   canvas.NewCircle(color.RGBA{R: 156, G: 163, B: 175, A: 255}),
-		label:  widget.NewLabel(fmt.Sprintf("CH%d", index+1)),
+		label:  widget.NewLabel("대기"),
 		status: state.PhaseIdle,
 	}
 
-	ci.icon.StrokeWidth = 0
-	ci.icon.Resize(fyne.NewSize(10, 10))
+	si.icon.StrokeWidth = 0
+	si.icon.Resize(fyne.NewSize(10, 10))
 
-	ci.label.TextStyle = fyne.TextStyle{Monospace: true}
+	si.label.TextStyle = fyne.TextStyle{Monospace: true}
 
-	ci.container = container.NewHBox(
-		ci.icon,
-		ci.label,
+	si.container = container.NewHBox(
+		si.icon,
+		si.label,
 	)
 
-	ci.ExtendBaseWidget(ci)
-	return ci
+	si.ExtendBaseWidget(si)
+	return si
 }
 
-// CreateRenderer ChannelIndicator 렌더러
-func (ci *ChannelIndicator) CreateRenderer() fyne.WidgetRenderer {
-	return widget.NewSimpleRenderer(ci.container)
+// CreateRenderer StatusIndicator 렌더러
+func (si *StatusIndicator) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(si.container)
 }
 
 // SetStatus 상태 설정
-func (ci *ChannelIndicator) SetStatus(phase state.ProcessPhase) {
-	ci.status = phase
+func (si *StatusIndicator) SetStatus(phase state.ProcessPhase) {
+	si.status = phase
 
 	var statusColor color.Color
 	var statusText string
@@ -173,10 +156,21 @@ func (ci *ChannelIndicator) SetStatus(phase state.ProcessPhase) {
 	case state.PhaseIdle:
 		statusColor = color.RGBA{R: 156, G: 163, B: 175, A: 255} // 회색
 		statusText = "대기"
-	case state.PhaseFetchingIssue, state.PhaseDownloadingAttachments,
-		state.PhaseExtractingFrames, state.PhaseGeneratingDocument, state.PhaseAnalyzing:
+	case state.PhaseFetchingIssue:
 		statusColor = color.RGBA{R: 59, G: 130, B: 246, A: 255} // 파란색
-		statusText = "진행"
+		statusText = "이슈 조회"
+	case state.PhaseDownloadingAttachments:
+		statusColor = color.RGBA{R: 59, G: 130, B: 246, A: 255}
+		statusText = "첨부파일 다운로드"
+	case state.PhaseExtractingFrames:
+		statusColor = color.RGBA{R: 59, G: 130, B: 246, A: 255}
+		statusText = "프레임 추출"
+	case state.PhaseGeneratingDocument:
+		statusColor = color.RGBA{R: 59, G: 130, B: 246, A: 255}
+		statusText = "문서 생성"
+	case state.PhaseAnalyzing:
+		statusColor = color.RGBA{R: 147, G: 51, B: 234, A: 255} // 보라색
+		statusText = "AI 분석"
 	case state.PhaseCompleted:
 		statusColor = color.RGBA{R: 34, G: 197, B: 94, A: 255} // 녹색
 		statusText = "완료"
@@ -188,22 +182,13 @@ func (ci *ChannelIndicator) SetStatus(phase state.ProcessPhase) {
 		statusText = "?"
 	}
 
-	ci.icon.FillColor = statusColor
-	ci.icon.Refresh()
+	si.icon.FillColor = statusColor
+	si.icon.Refresh()
 
-	ci.label.SetText(fmt.Sprintf("CH%d:%s", ci.getIndex()+1, statusText))
-}
-
-// getIndex 인덱스 조회 (label에서 추출)
-func (ci *ChannelIndicator) getIndex() int {
-	// label이 "CH1", "CH2", "CH3" 형식이므로 첫 번째 문자 제외
-	if len(ci.label.Text) >= 3 {
-		return int(ci.label.Text[2] - '1')
-	}
-	return 0
+	si.label.SetText(statusText)
 }
 
 // GetStatus 현재 상태 조회
-func (ci *ChannelIndicator) GetStatus() state.ProcessPhase {
-	return ci.status
+func (si *StatusIndicator) GetStatus() state.ProcessPhase {
+	return si.status
 }

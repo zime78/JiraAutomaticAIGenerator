@@ -22,9 +22,8 @@ const (
 	EventJobFailed    EventType = "job.failed"
 
 	// UI 관련 이벤트
-	EventChannelSwitch EventType = "channel.switch"
-	EventQueueUpdated  EventType = "queue.updated"
-	EventHistoryAdded  EventType = "history.added"
+	EventQueueUpdated EventType = "queue.updated"
+	EventHistoryAdded EventType = "history.added"
 
 	// 신규 이벤트 타입
 	EventSidebarAction      EventType = "sidebar.action"       // Sidebar에서 액션 발생

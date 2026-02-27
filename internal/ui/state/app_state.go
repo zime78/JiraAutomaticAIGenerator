@@ -12,9 +12,8 @@ import (
 type AppState struct {
 	mu sync.RWMutex
 
-	// 채널 상태
-	Channels      [3]*ChannelStateData
-	ActiveChannel int
+	// 채널 상태 (단일 채널)
+	Channel *ChannelStateData
 
 	// 글로벌 상태
 	GlobalStatus string
@@ -99,20 +98,19 @@ func (s StepStatus) String() string {
 
 // JobData 작업 데이터
 type JobData struct {
-	ID            string
-	IssueKey      string
-	MDPath        string
-	PlanPath      string
-	AnalysisPath  string
-	ScriptPath    string
-	LogPath       string
-	Phase         ProcessPhase
-	ChannelIndex  int
-	StartTime     time.Time
-	EndTime       time.Time
-	Duration      string
-	Status        JobStatus
-	Error         string
+	ID           string
+	IssueKey     string
+	MDPath       string
+	PlanPath     string
+	AnalysisPath string
+	ScriptPath   string
+	LogPath      string
+	Phase        ProcessPhase
+	StartTime    time.Time
+	EndTime      time.Time
+	Duration     string
+	Status       JobStatus
+	Error        string
 }
 
 // JobStatus 작업 상태
@@ -155,12 +153,7 @@ type LogEntry struct {
 // NewAppState 새 AppState 생성
 func NewAppState(issueStore port.IssueStore, analysisStore port.AnalysisResultStore) *AppState {
 	state := &AppState{
-		Channels: [3]*ChannelStateData{
-			NewChannelStateData(0, "채널 1"),
-			NewChannelStateData(1, "채널 2"),
-			NewChannelStateData(2, "채널 3"),
-		},
-		ActiveChannel: 0,
+		Channel:       NewChannelStateData(0, "기본"),
 		GlobalStatus:  "준비됨",
 		EventBus:      NewEventBus(),
 		CompletedJobs: make([]*JobData, 0),
@@ -171,7 +164,7 @@ func NewAppState(issueStore port.IssueStore, analysisStore port.AnalysisResultSt
 	// DB에서 기존 데이터 로드
 	if err := state.LoadFromDB(); err != nil {
 		// 로드 실패해도 앱은 시작 (로그만 남김)
-		state.AddLog(-1, LogError, "DB 로드 실패: "+err.Error(), "AppState")
+		state.AddLog(LogError, "DB 로드 실패: "+err.Error(), "AppState")
 	}
 
 	return state
@@ -201,91 +194,63 @@ func createDefaultSteps() []*StepState {
 	}
 }
 
-// GetChannel 특정 채널 상태 조회
+// GetChannel 채널 상태 조회 (하위 호환: index 무시)
 func (s *AppState) GetChannel(index int) *ChannelStateData {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-
-	if index < 0 || index >= 3 {
-		return nil
-	}
-	return s.Channels[index]
+	return s.Channel
 }
 
 // GetActiveChannel 활성 채널 상태 조회
 func (s *AppState) GetActiveChannel() *ChannelStateData {
-	return s.GetChannel(s.ActiveChannel)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.Channel
 }
 
-// SetActiveChannel 활성 채널 변경
-func (s *AppState) SetActiveChannel(index int) {
-	s.mu.Lock()
-	s.ActiveChannel = index
-	s.mu.Unlock()
-
-	s.EventBus.Publish(Event{
-		Type:    EventChannelSwitch,
-		Channel: index,
-		Data:    index,
-	})
-}
-
-// UpdatePhase 채널의 처리 단계 업데이트
+// UpdatePhase 처리 단계 업데이트
 func (s *AppState) UpdatePhase(channelIndex int, phase ProcessPhase) {
 	s.mu.Lock()
-	if channelIndex >= 0 && channelIndex < 3 {
-		ch := s.Channels[channelIndex]
-		ch.Phase = phase
-		ch.Progress = phase.Progress()
+	ch := s.Channel
+	ch.Phase = phase
+	ch.Progress = phase.Progress()
 
-		// 단계별 상태 업데이트
-		stepIndex := int(phase) - 1
-		if stepIndex >= 0 && stepIndex < len(ch.Steps) {
-			// 이전 단계들은 완료로 표시
-			for i := 0; i < stepIndex; i++ {
-				ch.Steps[i].Status = StepCompleted
-				ch.Steps[i].Progress = 1.0
-			}
-			// 현재 단계는 진행 중으로 표시
-			ch.Steps[stepIndex].Status = StepRunning
+	// 단계별 상태 업데이트
+	stepIndex := int(phase) - 1
+	if stepIndex >= 0 && stepIndex < len(ch.Steps) {
+		for i := 0; i < stepIndex; i++ {
+			ch.Steps[i].Status = StepCompleted
+			ch.Steps[i].Progress = 1.0
 		}
+		ch.Steps[stepIndex].Status = StepRunning
 	}
 	s.mu.Unlock()
 
-	s.EventBus.PublishPhaseChange(channelIndex, phase)
+	s.EventBus.PublishPhaseChange(0, phase)
 }
 
-// UpdateProgress 채널의 진행률 업데이트
+// UpdateProgress 진행률 업데이트
 func (s *AppState) UpdateProgress(channelIndex int, step, total int, message string) {
 	s.mu.Lock()
-	if channelIndex >= 0 && channelIndex < 3 {
-		ch := s.Channels[channelIndex]
-		progress := float64(step) / float64(total)
-		ch.Progress = progress
+	ch := s.Channel
+	progress := float64(step) / float64(total)
+	ch.Progress = progress
 
-		// 현재 진행 중인 단계의 진행률 업데이트
-		for _, st := range ch.Steps {
-			if st.Status == StepRunning {
-				st.Progress = progress
-				st.Message = message
-				break
-			}
+	for _, st := range ch.Steps {
+		if st.Status == StepRunning {
+			st.Progress = progress
+			st.Message = message
+			break
 		}
 	}
+	phase := ch.Phase
 	s.mu.Unlock()
 
-	phase := PhaseIdle
-	s.mu.RLock()
-	if channelIndex >= 0 && channelIndex < 3 {
-		phase = s.Channels[channelIndex].Phase
-	}
-	s.mu.RUnlock()
-
-	s.EventBus.PublishProgress(channelIndex, phase, step, total, message)
+	s.EventBus.PublishProgress(0, phase, step, total, message)
 }
 
-// AddLog 채널에 로그 추가
-func (s *AppState) AddLog(channelIndex int, level LogLevel, message, source string) {
+// AddLog 로그 추가
+func (s *AppState) AddLog(level LogLevel, message, source string) {
 	entry := LogEntry{
 		Timestamp: time.Now(),
 		Level:     level,
@@ -294,114 +259,90 @@ func (s *AppState) AddLog(channelIndex int, level LogLevel, message, source stri
 	}
 
 	s.mu.Lock()
-	if channelIndex >= 0 && channelIndex < 3 {
-		ch := s.Channels[channelIndex]
-		ch.Logs = append(ch.Logs, entry)
-
-		// 로그 개수 제한 (최대 1000개)
-		if len(ch.Logs) > 1000 {
-			ch.Logs = ch.Logs[len(ch.Logs)-1000:]
-		}
+	ch := s.Channel
+	ch.Logs = append(ch.Logs, entry)
+	if len(ch.Logs) > 1000 {
+		ch.Logs = ch.Logs[len(ch.Logs)-1000:]
 	}
 	s.mu.Unlock()
 
-	s.EventBus.PublishLog(channelIndex, level, message, source)
+	s.EventBus.PublishLog(0, level, message, source)
 }
 
-// AddJob 채널 대기열에 작업 추가
-func (s *AppState) AddJob(channelIndex int, job *JobData) {
+// AddJob 대기열에 작업 추가
+func (s *AppState) AddJob(job *JobData) {
 	s.mu.Lock()
-	if channelIndex >= 0 && channelIndex < 3 {
-		ch := s.Channels[channelIndex]
-		ch.Queue = append(ch.Queue, job)
-	}
+	s.Channel.Queue = append(s.Channel.Queue, job)
 	s.mu.Unlock()
 
 	s.EventBus.Publish(Event{
 		Type:    EventQueueUpdated,
-		Channel: channelIndex,
+		Channel: 0,
 		Data:    job,
 	})
 }
 
 // CompleteJob 작업 완료 처리
-func (s *AppState) CompleteJob(channelIndex int, jobID string, result interface{}) {
+func (s *AppState) CompleteJob(jobID string, result interface{}) {
 	s.mu.Lock()
-	if channelIndex >= 0 && channelIndex < 3 {
-		ch := s.Channels[channelIndex]
-
-		// 현재 작업 완료 처리
-		if ch.CurrentJob != nil && ch.CurrentJob.ID == jobID {
-			ch.CurrentJob.Status = JobCompleted
-			ch.CurrentJob.EndTime = time.Now()
-
-			// 완료 목록에 추가
-			s.CompletedJobs = append([]*JobData{ch.CurrentJob}, s.CompletedJobs...)
-
-			ch.CurrentJob = nil
-			ch.IsRunning = false
-		}
+	ch := s.Channel
+	if ch.CurrentJob != nil && ch.CurrentJob.ID == jobID {
+		ch.CurrentJob.Status = JobCompleted
+		ch.CurrentJob.EndTime = time.Now()
+		s.CompletedJobs = append([]*JobData{ch.CurrentJob}, s.CompletedJobs...)
+		ch.CurrentJob = nil
+		ch.IsRunning = false
 	}
 	s.mu.Unlock()
 
-	s.EventBus.PublishJobCompleted(channelIndex, jobID, result)
-
+	s.EventBus.PublishJobCompleted(0, jobID, result)
 	s.EventBus.Publish(Event{
 		Type:    EventHistoryAdded,
-		Channel: channelIndex,
+		Channel: 0,
 		Data:    jobID,
 	})
 }
 
 // FailJob 작업 실패 처리
-func (s *AppState) FailJob(channelIndex int, jobID string, err error) {
+func (s *AppState) FailJob(jobID string, err error) {
 	s.mu.Lock()
-	if channelIndex >= 0 && channelIndex < 3 {
-		ch := s.Channels[channelIndex]
+	ch := s.Channel
+	if ch.CurrentJob != nil && ch.CurrentJob.ID == jobID {
+		ch.CurrentJob.Status = JobFailed
+		ch.CurrentJob.EndTime = time.Now()
+		ch.CurrentJob.Error = err.Error()
+		s.CompletedJobs = append([]*JobData{ch.CurrentJob}, s.CompletedJobs...)
+		ch.CurrentJob = nil
+		ch.IsRunning = false
+	}
 
-		if ch.CurrentJob != nil && ch.CurrentJob.ID == jobID {
-			ch.CurrentJob.Status = JobFailed
-			ch.CurrentJob.EndTime = time.Now()
-			ch.CurrentJob.Error = err.Error()
-
-			// 완료 목록에 추가 (실패도 이력에 남김)
-			s.CompletedJobs = append([]*JobData{ch.CurrentJob}, s.CompletedJobs...)
-
-			ch.CurrentJob = nil
-			ch.IsRunning = false
-		}
-
-		// 단계 상태를 실패로 변경
-		ch.Phase = PhaseFailed
-		for _, st := range ch.Steps {
-			if st.Status == StepRunning {
-				st.Status = StepFailed
-				break
-			}
+	ch.Phase = PhaseFailed
+	for _, st := range ch.Steps {
+		if st.Status == StepRunning {
+			st.Status = StepFailed
+			break
 		}
 	}
 	s.mu.Unlock()
 
-	s.EventBus.PublishJobFailed(channelIndex, jobID, err)
+	s.EventBus.PublishJobFailed(0, jobID, err)
 }
 
 // ResetChannel 채널 상태 초기화
-func (s *AppState) ResetChannel(channelIndex int) {
+func (s *AppState) ResetChannel() {
 	s.mu.Lock()
-	if channelIndex >= 0 && channelIndex < 3 {
-		ch := s.Channels[channelIndex]
-		ch.Phase = PhaseIdle
-		ch.Progress = 0
-		ch.Steps = createDefaultSteps()
-		ch.Logs = make([]LogEntry, 0)
-		ch.IssueInfo = ""
-		ch.Analysis = ""
-		ch.CurrentDoc = nil
-		ch.CurrentMDPath = ""
-		ch.CurrentAnalysisPath = ""
-		ch.CurrentPlanPath = ""
-		ch.CurrentScriptPath = ""
-	}
+	ch := s.Channel
+	ch.Phase = PhaseIdle
+	ch.Progress = 0
+	ch.Steps = createDefaultSteps()
+	ch.Logs = make([]LogEntry, 0)
+	ch.IssueInfo = ""
+	ch.Analysis = ""
+	ch.CurrentDoc = nil
+	ch.CurrentMDPath = ""
+	ch.CurrentAnalysisPath = ""
+	ch.CurrentPlanPath = ""
+	ch.CurrentScriptPath = ""
 	s.mu.Unlock()
 }
 
@@ -443,13 +384,12 @@ func (s *AppState) LoadFromDB() error {
 
 	for _, issue := range issues {
 		job := &JobData{
-			ID:           issue.IssueKey,
-			IssueKey:     issue.IssueKey,
-			MDPath:       issue.MDPath,
-			ChannelIndex: issue.ChannelIndex,
-			StartTime:    issue.CreatedAt,
-			EndTime:      issue.UpdatedAt,
-			Status:       JobCompleted,
+			ID:        issue.IssueKey,
+			IssueKey:  issue.IssueKey,
+			MDPath:    issue.MDPath,
+			StartTime: issue.CreatedAt,
+			EndTime:   issue.UpdatedAt,
+			Status:    JobCompleted,
 		}
 
 		// Phase에 따라 상태 설정
@@ -484,10 +424,9 @@ func (s *AppState) LoadFromDB() error {
 }
 
 // SaveIssueToDBAfterPhase1 1차 분석 완료 후 DB에 저장한다.
-// 동일 이슈 키라도 채널이 다르면 독립 레코드로 유지하기 위해 Upsert를 사용한다.
-func (s *AppState) SaveIssueToDBAfterPhase1(channelIndex int, issueKey, summary, description, jiraURL, mdPath string) (*domain.IssueRecord, error) {
+func (s *AppState) SaveIssueToDBAfterPhase1(issueKey, summary, description, jiraURL, mdPath string) (*domain.IssueRecord, error) {
 	if s.IssueStore == nil {
-		return nil, nil // DB가 없으면 스킵
+		return nil, nil
 	}
 
 	issue := &domain.IssueRecord{
@@ -496,9 +435,9 @@ func (s *AppState) SaveIssueToDBAfterPhase1(channelIndex int, issueKey, summary,
 		Description:  description,
 		JiraURL:      jiraURL,
 		MDPath:       mdPath,
-		Phase:        1, // 1차 완료
+		Phase:        1,
 		Status:       "active",
-		ChannelIndex: channelIndex,
+		ChannelIndex: 0,
 	}
 
 	if err := s.IssueStore.UpsertIssue(issue); err != nil {

@@ -7,7 +7,6 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
-	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 
 	"jira-ai-generator/internal/adapter"
@@ -37,19 +36,18 @@ type App struct {
 	// UI components (글로벌)
 	statusLabel *widget.Label
 	stopAllBtn  *widget.Button
-	tabs        *container.AppTabs // 채널 탭 (채널1/채널2/채널3)
 	historyList *widget.List
 
-	// 채널별 독립 UI 및 상태
-	channels [3]*ChannelState
+	// 단일 채널 UI 및 상태
+	channel *ChannelState
 
 	// Processing state
-	queues        [3]*AnalysisQueue
+	queue         *AnalysisQueue
 	completedJobs []*AnalysisJob
 
 	// V2 실행 작업 추적
 	runningTasksMu sync.Mutex
-	runningTasks   [3]map[string]*RunningTask
+	runningTasks   map[string]*RunningTask
 
 	// UI version control
 	useV2UI bool // V2 UI 사용 여부 (기본값: true, V1은 deprecated)
@@ -63,7 +61,6 @@ type RunningTask struct {
 	TaskID          string
 	IssueID         int64
 	IssueKey        string
-	ChannelIndex    int
 	PhaseLabel      string
 	PID             int
 	ScriptPath      string
@@ -103,20 +100,10 @@ func NewApp(cfg *config.Config) (*App, error) {
 		analysisStore:   repo,
 		attachmentStore: repo,
 		repository:      repo,
-		useV2UI:         true, // V2 UI를 기본으로 활성화
-		channels: [3]*ChannelState{
-			{Index: 0, Name: "채널 1"},
-			{Index: 1, Name: "채널 2"},
-			{Index: 2, Name: "채널 3"},
-		},
-		queues: [3]*AnalysisQueue{
-			{Name: "채널 1", Pending: []*AnalysisJob{}},
-			{Name: "채널 2", Pending: []*AnalysisJob{}},
-			{Name: "채널 3", Pending: []*AnalysisJob{}},
-		},
-	}
-	for i := 0; i < 3; i++ {
-		appInstance.runningTasks[i] = make(map[string]*RunningTask)
+		useV2UI:         true,
+		channel:         &ChannelState{Index: 0, Name: "기본"},
+		queue:           &AnalysisQueue{Name: "기본", Pending: []*AnalysisJob{}},
+		runningTasks:    make(map[string]*RunningTask),
 	}
 
 	return appInstance, nil

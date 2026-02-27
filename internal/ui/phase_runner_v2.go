@@ -41,26 +41,14 @@ type phaseRunOutcome struct {
 	err        error
 }
 
-// buildHistoryID는 사이드바 이력 식별자를 channel:issueID 형식으로 생성한다.
-func buildHistoryID(channelIndex int, issueID int64) string {
-	return fmt.Sprintf("%d:%d", channelIndex, issueID)
+// buildHistoryID는 사이드바 이력 식별자를 issueID 문자열로 생성한다.
+func buildHistoryID(issueID int64) string {
+	return strconv.FormatInt(issueID, 10)
 }
 
-// parseHistoryID는 channel:issueID 형식 문자열을 파싱한다.
-func parseHistoryID(historyID string) (int, int64, error) {
-	parts := strings.Split(historyID, ":")
-	if len(parts) != 2 {
-		return 0, 0, fmt.Errorf("invalid history id format")
-	}
-	channelIndex, err := strconv.Atoi(parts[0])
-	if err != nil {
-		return 0, 0, fmt.Errorf("invalid history channel: %w", err)
-	}
-	issueID, err := strconv.ParseInt(parts[1], 10, 64)
-	if err != nil {
-		return 0, 0, fmt.Errorf("invalid history issue id: %w", err)
-	}
-	return channelIndex, issueID, nil
+// parseHistoryID는 issueID 문자열을 파싱한다.
+func parseHistoryID(historyID string) (int64, error) {
+	return strconv.ParseInt(historyID, 10, 64)
 }
 
 // loadHistoryRecordToChannelV2는 사이드바 이력 선택 시 DB 기준으로 결과를 복원한다.
@@ -69,7 +57,7 @@ func (a *App) loadHistoryRecordToChannelV2(historyID string, v2 *AppV2State) {
 		return
 	}
 
-	channelIndex, issueID, err := parseHistoryID(historyID)
+	issueID, err := parseHistoryID(historyID)
 	if err != nil {
 		// 구버전 이력 ID(이슈 키 문자열) 호환 처리
 		legacyIssue, legacyErr := a.issueStore.GetIssue(historyID)
@@ -80,13 +68,11 @@ func (a *App) loadHistoryRecordToChannelV2(historyID string, v2 *AppV2State) {
 		a.loadIssueRecordToChannelV2(legacyIssue, v2)
 		return
 	}
-	if channelIndex < 0 || channelIndex >= 3 {
-		return
-	}
 
-	issues, err := a.issueStore.ListIssuesByChannel(channelIndex)
-	if err != nil {
-		logger.Debug("loadHistoryRecordToChannelV2: list issues failed: %v", err)
+	// ID로 이슈 검색
+	issues, listErr := a.issueStore.ListAllIssues()
+	if listErr != nil {
+		logger.Debug("loadHistoryRecordToChannelV2: list issues failed: %v", listErr)
 		return
 	}
 
@@ -104,20 +90,12 @@ func (a *App) loadHistoryRecordToChannelV2(historyID string, v2 *AppV2State) {
 	a.loadIssueRecordToChannelV2(selected, v2)
 }
 
-// loadIssueRecordToChannelV2는 특정 이슈 레코드를 해당 채널 UI에 로드한다.
+// loadIssueRecordToChannelV2는 이슈 레코드를 UI에 로드한다.
 func (a *App) loadIssueRecordToChannelV2(issue *domain.IssueRecord, v2 *AppV2State) {
 	if issue == nil || v2 == nil {
 		return
 	}
-	channelIndex := issue.ChannelIndex
-	if channelIndex < 0 || channelIndex >= 3 {
-		return
-	}
-	ch := a.channels[channelIndex]
-
-	if a.tabs != nil {
-		a.tabs.SelectIndex(channelIndex)
-	}
+	ch := a.channel
 
 	issueContent := issue.Description
 	if issue.MDPath != "" {
@@ -125,7 +103,7 @@ func (a *App) loadIssueRecordToChannelV2(issue *domain.IssueRecord, v2 *AppV2Sta
 			issueContent = string(raw)
 		}
 	}
-	v2.resultPanels[channelIndex].SetIssueInfo(issueContent)
+	v2.resultPanel.SetIssueInfo(issueContent)
 	ch.ResultText.SetText(issueContent)
 	ch.CurrentDoc = &domain.GeneratedDocument{
 		IssueKey: issue.IssueKey,
@@ -158,44 +136,37 @@ func (a *App) loadIssueRecordToChannelV2(issue *domain.IssueRecord, v2 *AppV2Sta
 	// 2차 분석 결과가 있으면 이슈 정보에 표시 (1차 결과 대체)
 	if analysisPath != "" {
 		if raw, err := os.ReadFile(analysisPath); err == nil {
-			v2.resultPanels[channelIndex].SetIssueInfo(string(raw))
+			v2.resultPanel.SetIssueInfo(string(raw))
 		}
 	}
 
-	a.statusLabel.SetText(fmt.Sprintf("이력 로드됨: %s (채널 %d)", issue.IssueKey, channelIndex+1))
+	a.statusLabel.SetText(fmt.Sprintf("이력 로드됨: %s", issue.IssueKey))
 }
 
-// registerRunningTask는 채널별 실행 작업을 등록한다.
+// registerRunningTask는 실행 작업을 등록한다.
 func (a *App) registerRunningTask(task *RunningTask) {
-	if task == nil || task.ChannelIndex < 0 || task.ChannelIndex >= 3 {
+	if task == nil {
 		return
 	}
 	a.runningTasksMu.Lock()
 	defer a.runningTasksMu.Unlock()
-	a.runningTasks[task.ChannelIndex][task.TaskID] = task
+	a.runningTasks[task.TaskID] = task
 }
 
-// unregisterRunningTask는 채널별 실행 작업을 해제한다.
-func (a *App) unregisterRunningTask(channelIndex int, taskID string) {
+// unregisterRunningTask는 실행 작업을 해제한다.
+func (a *App) unregisterRunningTask(taskID string) {
 	a.runningTasksMu.Lock()
 	defer a.runningTasksMu.Unlock()
-	if channelIndex < 0 || channelIndex >= 3 {
-		return
-	}
-	delete(a.runningTasks[channelIndex], taskID)
+	delete(a.runningTasks, taskID)
 }
 
-// markCancelRunningTasks는 채널의 실행 중 작업에 취소 플래그를 설정한다.
-func (a *App) markCancelRunningTasks(channelIndex int) []*RunningTask {
+// markCancelRunningTasks는 실행 중 작업에 취소 플래그를 설정한다.
+func (a *App) markCancelRunningTasks() []*RunningTask {
 	a.runningTasksMu.Lock()
 	defer a.runningTasksMu.Unlock()
 
-	if channelIndex < 0 || channelIndex >= 3 {
-		return nil
-	}
-
-	tasks := make([]*RunningTask, 0, len(a.runningTasks[channelIndex]))
-	for _, task := range a.runningTasks[channelIndex] {
+	tasks := make([]*RunningTask, 0, len(a.runningTasks))
+	for _, task := range a.runningTasks {
 		task.CancelRequested = true
 		tasks = append(tasks, task)
 	}
@@ -208,16 +179,11 @@ func (a *App) markRunningTaskCancelledInDB(task *RunningTask) {
 		return
 	}
 
-	issues, err := a.issueStore.ListIssuesByChannel(task.ChannelIndex)
-	if err == nil {
-		for _, issue := range issues {
-			if issue.ID == task.IssueID || issue.IssueKey == task.IssueKey {
-				issue.Status = "cancelled"
-				if updateErr := a.issueStore.UpdateIssue(issue); updateErr != nil {
-					logger.Debug("markRunningTaskCancelledInDB: UpdateIssue failed: %v", updateErr)
-				}
-				break
-			}
+	issue, err := a.issueStore.GetIssue(task.IssueKey)
+	if err == nil && issue != nil {
+		issue.Status = "cancelled"
+		if updateErr := a.issueStore.UpdateIssue(issue); updateErr != nil {
+			logger.Debug("markRunningTaskCancelledInDB: UpdateIssue failed: %v", updateErr)
 		}
 	}
 
@@ -436,28 +402,28 @@ func isHookRelatedError(err error) bool {
 }
 
 // runPhase2BatchV2는 선택된 1차 완료 항목들을 병렬로 2차 실행한다.
-func (a *App) runPhase2BatchV2(channelIndex int, records []*domain.IssueRecord, v2 *AppV2State) {
-	a.runPhaseBatchV2(channelIndex, records, "2차", v2)
+func (a *App) runPhase2BatchV2(records []*domain.IssueRecord, v2 *AppV2State) {
+	a.runPhaseBatchV2(records, "2차", v2)
 }
 
 // runPhaseBatchV2는 2차 병렬 실행 흐름을 처리한다.
-func (a *App) runPhaseBatchV2(channelIndex int, records []*domain.IssueRecord, phaseLabel string, v2 *AppV2State) {
+func (a *App) runPhaseBatchV2(records []*domain.IssueRecord, phaseLabel string, v2 *AppV2State) {
 	if len(records) == 0 {
 		return
 	}
 
-	workDir := strings.TrimSpace(a.config.Claude.ChannelPaths[channelIndex])
+	workDir := strings.TrimSpace(a.config.Claude.ProjectPath)
 	if workDir == "" {
 		fyne.Do(func() {
-			v2.appState.FailJob(channelIndex, "", fmt.Errorf("채널 %d 프로젝트 경로 미설정", channelIndex+1))
-			v2.progressPanels[channelIndex].SetError("프로젝트 경로 미설정")
+			v2.appState.FailJob("", fmt.Errorf("프로젝트 경로 미설정"))
+			v2.progressPanel.SetError("프로젝트 경로 미설정")
 		})
 		return
 	}
 
-	v2.appState.UpdatePhase(channelIndex, state.PhaseAIPlanGeneration)
+	v2.appState.UpdatePhase(0, state.PhaseAIPlanGeneration)
 	fyne.Do(func() {
-		v2.progressPanels[channelIndex].SetProgress(0.75, fmt.Sprintf("%s 작업 시작...", phaseLabel))
+		v2.progressPanel.SetProgress(0.75, fmt.Sprintf("%s 작업 시작...", phaseLabel))
 	})
 
 	resultsCh := make(chan phaseRunOutcome, len(records))
@@ -468,7 +434,7 @@ func (a *App) runPhaseBatchV2(channelIndex int, records []*domain.IssueRecord, p
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			resultsCh <- a.runPhase2RecordV2(channelIndex, record, workDir, v2)
+			resultsCh <- a.runPhase2RecordV2(record, workDir, v2)
 		}()
 	}
 
@@ -494,24 +460,24 @@ func (a *App) runPhaseBatchV2(channelIndex int, records []*domain.IssueRecord, p
 		progress := 0.75 + (float64(doneCount)/float64(total))*0.25
 		message := fmt.Sprintf("%s 진행 중 (%d/%d, 성공 %d, 실패 %d)", phaseLabel, doneCount, total, successCount, failedCount)
 		fyne.Do(func() {
-			v2.progressPanels[channelIndex].SetProgress(progress, message)
+			v2.progressPanel.SetProgress(progress, message)
 		})
 	}
 
 	fyne.Do(func() {
 		if successCount == 0 {
-			v2.progressPanels[channelIndex].SetError(fmt.Sprintf("%s 모든 항목 실패", phaseLabel))
-			v2.appState.UpdatePhase(channelIndex, state.PhaseFailed)
+			v2.progressPanel.SetError(fmt.Sprintf("%s 모든 항목 실패", phaseLabel))
+			v2.appState.UpdatePhase(0, state.PhaseFailed)
 			return
 		}
 
-		v2.appState.UpdatePhase(channelIndex, state.PhaseCompleted)
-		v2.progressPanels[channelIndex].SetComplete()
+		v2.appState.UpdatePhase(0, state.PhaseCompleted)
+		v2.progressPanel.SetComplete()
 	})
 }
 
 // runPhase2RecordV2는 단일 이슈의 2차 실행을 처리한다.
-func (a *App) runPhase2RecordV2(channelIndex int, record *domain.IssueRecord, workDir string, v2 *AppV2State) phaseRunOutcome {
+func (a *App) runPhase2RecordV2(record *domain.IssueRecord, workDir string, v2 *AppV2State) phaseRunOutcome {
 	outcome := phaseRunOutcome{record: record, phaseLabel: "2차"}
 	if record == nil || record.MDPath == "" {
 		outcome.err = fmt.Errorf("md path is empty")
@@ -525,18 +491,17 @@ func (a *App) runPhase2RecordV2(channelIndex int, record *domain.IssueRecord, wo
 		result, err = a.claudeAdapter.AnalyzeAndGeneratePlan(record.MDPath, a.config.AI.PromptTemplate, workDir)
 		if err == nil {
 			task := &RunningTask{
-				TaskID:       fmt.Sprintf("phase2:%d:%d", channelIndex, record.ID),
-				IssueID:      record.ID,
-				IssueKey:     record.IssueKey,
-				ChannelIndex: channelIndex,
-				PhaseLabel:   "2차",
-				PID:          result.PID,
-				ScriptPath:   result.ScriptPath,
-				LogPath:      result.LogPath,
+				TaskID:     fmt.Sprintf("phase2:%d", record.ID),
+				IssueID:    record.ID,
+				IssueKey:   record.IssueKey,
+				PhaseLabel: "2차",
+				PID:        result.PID,
+				ScriptPath: result.ScriptPath,
+				LogPath:    result.LogPath,
 			}
 			a.registerRunningTask(task)
 			waitErr := waitForTaskResult(task, result.PlanPath)
-			a.unregisterRunningTask(channelIndex, task.TaskID)
+			a.unregisterRunningTask(task.TaskID)
 			if waitErr == nil {
 				break
 			}
@@ -581,16 +546,15 @@ func (a *App) runPhase2RecordV2(channelIndex int, record *domain.IssueRecord, wo
 		analysisContent = string(raw)
 	}
 	fyne.Do(func() {
-		v2.resultPanels[channelIndex].SetIssueInfo(analysisContent)
-		a.channels[channelIndex].CurrentPlanPath = result.PlanPath
-		a.channels[channelIndex].CurrentAnalysisPath = result.PlanPath
+		v2.resultPanel.SetIssueInfo(analysisContent)
+		a.channel.CurrentPlanPath = result.PlanPath
+		a.channel.CurrentAnalysisPath = result.PlanPath
 	})
 
 	v2.appState.EventBus.Publish(state.Event{
 		Type:    state.EventPhase2Complete,
-		Channel: channelIndex,
+		Channel: 0,
 		Data:    record,
 	})
 	return outcome
 }
-

@@ -45,7 +45,7 @@ func TestCreateAndGetIssue(t *testing.T) {
 		MDPath:       "/path/to/test.md",
 		Phase:        1,
 		Status:       "active",
-		ChannelIndex: 1,
+		ChannelIndex: 0,
 	}
 
 	// Act
@@ -90,7 +90,7 @@ func TestUpdateIssue(t *testing.T) {
 		Summary:      "Original Summary",
 		Phase:        1,
 		Status:       "active",
-		ChannelIndex: 1,
+		ChannelIndex: 0,
 	}
 
 	err = repo.CreateIssue(issue)
@@ -132,9 +132,9 @@ func TestListIssuesByPhase(t *testing.T) {
 	defer repo.Close()
 
 	issues := []*domain.IssueRecord{
-		{IssueKey: "TEST-1", Phase: 1, Status: "active", ChannelIndex: 1},
-		{IssueKey: "TEST-2", Phase: 1, Status: "active", ChannelIndex: 1},
-		{IssueKey: "TEST-3", Phase: 2, Status: "active", ChannelIndex: 1},
+		{IssueKey: "TEST-1", Phase: 1, Status: "active", ChannelIndex: 0},
+		{IssueKey: "TEST-2", Phase: 1, Status: "active", ChannelIndex: 0},
+		{IssueKey: "TEST-3", Phase: 2, Status: "active", ChannelIndex: 0},
 	}
 
 	for _, issue := range issues {
@@ -155,41 +155,6 @@ func TestListIssuesByPhase(t *testing.T) {
 	}
 }
 
-func TestListIssuesByChannel(t *testing.T) {
-	// Arrange
-	dbPath := "test.db"
-	defer os.Remove(dbPath)
-
-	repo, err := NewSQLiteRepository(dbPath)
-	if err != nil {
-		t.Fatalf("Failed to create repository: %v", err)
-	}
-	defer repo.Close()
-
-	issues := []*domain.IssueRecord{
-		{IssueKey: "TEST-1", Phase: 1, Status: "active", ChannelIndex: 1},
-		{IssueKey: "TEST-2", Phase: 1, Status: "active", ChannelIndex: 2},
-		{IssueKey: "TEST-3", Phase: 1, Status: "active", ChannelIndex: 1},
-	}
-
-	for _, issue := range issues {
-		if err := repo.CreateIssue(issue); err != nil {
-			t.Fatalf("CreateIssue failed: %v", err)
-		}
-	}
-
-	// Act
-	channel1Issues, err := repo.ListIssuesByChannel(1)
-	if err != nil {
-		t.Fatalf("ListIssuesByChannel failed: %v", err)
-	}
-
-	// Assert
-	if len(channel1Issues) != 2 {
-		t.Errorf("Expected 2 issues in channel 1, got %d", len(channel1Issues))
-	}
-}
-
 func TestCreateAndGetAnalysisResult(t *testing.T) {
 	// Arrange
 	dbPath := "test.db"
@@ -205,7 +170,7 @@ func TestCreateAndGetAnalysisResult(t *testing.T) {
 		IssueKey:     "TEST-200",
 		Phase:        1,
 		Status:       "active",
-		ChannelIndex: 1,
+		ChannelIndex: 0,
 	}
 	if err := repo.CreateIssue(issue); err != nil {
 		t.Fatalf("CreateIssue failed: %v", err)
@@ -257,7 +222,7 @@ func TestCreateAndListAttachments(t *testing.T) {
 		IssueKey:     "TEST-300",
 		Phase:        1,
 		Status:       "active",
-		ChannelIndex: 1,
+		ChannelIndex: 0,
 	}
 	if err := repo.CreateIssue(issue); err != nil {
 		t.Fatalf("CreateIssue failed: %v", err)
@@ -313,7 +278,7 @@ func TestDeleteIssue(t *testing.T) {
 		IssueKey:     "TEST-400",
 		Phase:        1,
 		Status:       "active",
-		ChannelIndex: 1,
+		ChannelIndex: 0,
 	}
 	if err := repo.CreateIssue(issue); err != nil {
 		t.Fatalf("CreateIssue failed: %v", err)
@@ -332,7 +297,8 @@ func TestDeleteIssue(t *testing.T) {
 	}
 }
 
-func TestCreateIssue_AllowsSameIssueKeyAcrossChannels(t *testing.T) {
+// TestCreateIssue_DuplicateKeyFails는 동일 issue_key 중복 생성이 실패하는지 검증한다.
+func TestCreateIssue_DuplicateKeyFails(t *testing.T) {
 	// Arrange
 	dbPath := "test.db"
 	defer os.Remove(dbPath)
@@ -343,44 +309,35 @@ func TestCreateIssue_AllowsSameIssueKeyAcrossChannels(t *testing.T) {
 	}
 	defer repo.Close()
 
-	issueChannel1 := &domain.IssueRecord{
+	issue1 := &domain.IssueRecord{
 		IssueKey:     "TEST-500",
-		Summary:      "channel 1 issue",
+		Summary:      "first issue",
 		Phase:        1,
 		Status:       "active",
-		ChannelIndex: 1,
-	}
-	issueChannel2 := &domain.IssueRecord{
-		IssueKey:     "TEST-500",
-		Summary:      "channel 2 issue",
-		Phase:        1,
-		Status:       "active",
-		ChannelIndex: 2,
+		ChannelIndex: 0,
 	}
 
 	// Act
-	if err := repo.CreateIssue(issueChannel1); err != nil {
-		t.Fatalf("CreateIssue(channel1) failed: %v", err)
-	}
-	if err := repo.CreateIssue(issueChannel2); err != nil {
-		t.Fatalf("CreateIssue(channel2) failed: %v", err)
+	if err := repo.CreateIssue(issue1); err != nil {
+		t.Fatalf("CreateIssue(first) failed: %v", err)
 	}
 
-	// Assert
-	got1, err := repo.GetIssueByKeyAndChannel("TEST-500", 1)
-	if err != nil {
-		t.Fatalf("GetIssueByKeyAndChannel(channel1) failed: %v", err)
+	issue2 := &domain.IssueRecord{
+		IssueKey:     "TEST-500",
+		Summary:      "duplicate issue",
+		Phase:        1,
+		Status:       "active",
+		ChannelIndex: 0,
 	}
-	got2, err := repo.GetIssueByKeyAndChannel("TEST-500", 2)
-	if err != nil {
-		t.Fatalf("GetIssueByKeyAndChannel(channel2) failed: %v", err)
-	}
-	if got1.ID == got2.ID {
-		t.Fatalf("Expected different records per channel, got same ID=%d", got1.ID)
+
+	// Assert - 동일 키 중복 삽입은 실패해야 한다
+	if err := repo.CreateIssue(issue2); err == nil {
+		t.Fatal("Expected duplicate issue_key to fail")
 	}
 }
 
-func TestUpsertIssue_UpdatesExistingByChannel(t *testing.T) {
+// TestUpsertIssue_UpdatesExisting는 동일 키 Upsert 시 기존 레코드가 업데이트되는지 검증한다.
+func TestUpsertIssue_UpdatesExisting(t *testing.T) {
 	// Arrange
 	dbPath := "test.db"
 	defer os.Remove(dbPath)
@@ -396,7 +353,7 @@ func TestUpsertIssue_UpdatesExistingByChannel(t *testing.T) {
 		Summary:      "original",
 		Phase:        1,
 		Status:       "active",
-		ChannelIndex: 1,
+		ChannelIndex: 0,
 	}
 	if err := repo.CreateIssue(original); err != nil {
 		t.Fatalf("CreateIssue failed: %v", err)
@@ -407,7 +364,7 @@ func TestUpsertIssue_UpdatesExistingByChannel(t *testing.T) {
 		Summary:      "updated by upsert",
 		Phase:        2,
 		Status:       "active",
-		ChannelIndex: 1,
+		ChannelIndex: 0,
 	}
 
 	// Act
@@ -416,9 +373,9 @@ func TestUpsertIssue_UpdatesExistingByChannel(t *testing.T) {
 	}
 
 	// Assert
-	got, err := repo.GetIssueByKeyAndChannel("TEST-501", 1)
+	got, err := repo.GetIssue("TEST-501")
 	if err != nil {
-		t.Fatalf("GetIssueByKeyAndChannel failed: %v", err)
+		t.Fatalf("GetIssue failed: %v", err)
 	}
 	if got.Summary != "updated by upsert" {
 		t.Fatalf("Expected updated summary, got %s", got.Summary)
@@ -428,7 +385,8 @@ func TestUpsertIssue_UpdatesExistingByChannel(t *testing.T) {
 	}
 }
 
-func TestDeleteIssueByIDAndChannel_DeletesOnlyTargetIssueAndRelatedData(t *testing.T) {
+// TestDeleteIssueByID_DeletesTargetAndRelatedData는 ID로 삭제 시 연관 데이터도 함께 삭제되는지 검증한다.
+func TestDeleteIssueByID_DeletesTargetAndRelatedData(t *testing.T) {
 	// Arrange
 	dbPath := "test.db"
 	defer os.Remove(dbPath)
@@ -439,37 +397,27 @@ func TestDeleteIssueByIDAndChannel_DeletesOnlyTargetIssueAndRelatedData(t *testi
 	}
 	defer repo.Close()
 
-	issueCh0 := &domain.IssueRecord{
+	issue := &domain.IssueRecord{
 		IssueKey:     "TEST-700",
-		Summary:      "channel 0 issue",
+		Summary:      "test issue",
 		Phase:        2,
 		Status:       "active",
 		ChannelIndex: 0,
 	}
-	issueCh1 := &domain.IssueRecord{
-		IssueKey:     "TEST-700",
-		Summary:      "channel 1 issue",
-		Phase:        2,
-		Status:       "active",
-		ChannelIndex: 1,
-	}
 
-	if err := repo.CreateIssue(issueCh0); err != nil {
-		t.Fatalf("CreateIssue(channel0) failed: %v", err)
-	}
-	if err := repo.CreateIssue(issueCh1); err != nil {
-		t.Fatalf("CreateIssue(channel1) failed: %v", err)
+	if err := repo.CreateIssue(issue); err != nil {
+		t.Fatalf("CreateIssue failed: %v", err)
 	}
 
 	if err := repo.CreateAnalysisResult(&domain.AnalysisResult{
-		IssueID:       issueCh0.ID,
+		IssueID:       issue.ID,
 		AnalysisPhase: 2,
 		Status:        "completed",
 	}); err != nil {
 		t.Fatalf("CreateAnalysisResult failed: %v", err)
 	}
 	if err := repo.CreateAttachment(&domain.AttachmentRecord{
-		IssueID:   issueCh0.ID,
+		IssueID:   issue.ID,
 		Filename:  "test.png",
 		LocalPath: "/tmp/test.png",
 		MimeType:  "image/png",
@@ -479,22 +427,17 @@ func TestDeleteIssueByIDAndChannel_DeletesOnlyTargetIssueAndRelatedData(t *testi
 	}
 
 	// Act
-	if err := repo.DeleteIssueByIDAndChannel(issueCh0.ID, 0); err != nil {
-		t.Fatalf("DeleteIssueByIDAndChannel failed: %v", err)
+	if err := repo.DeleteIssueByID(issue.ID); err != nil {
+		t.Fatalf("DeleteIssueByID failed: %v", err)
 	}
 
-	// Assert - 대상 채널 이슈는 삭제되어야 한다.
-	if _, err := repo.GetIssueByKeyAndChannel("TEST-700", 0); err == nil {
-		t.Fatal("expected channel 0 issue to be deleted")
+	// Assert - 이슈가 삭제되어야 한다
+	if _, err := repo.GetIssue("TEST-700"); err == nil {
+		t.Fatal("expected issue to be deleted")
 	}
 
-	// Assert - 다른 채널 이슈는 유지되어야 한다.
-	if _, err := repo.GetIssueByKeyAndChannel("TEST-700", 1); err != nil {
-		t.Fatalf("expected channel 1 issue to remain, got error: %v", err)
-	}
-
-	// Assert - 연관된 분석 결과/첨부도 함께 삭제되어야 한다.
-	results, err := repo.ListAnalysisResultsByIssue(issueCh0.ID)
+	// Assert - 연관된 분석 결과도 삭제되어야 한다
+	results, err := repo.ListAnalysisResultsByIssue(issue.ID)
 	if err != nil {
 		t.Fatalf("ListAnalysisResultsByIssue failed: %v", err)
 	}
@@ -502,7 +445,8 @@ func TestDeleteIssueByIDAndChannel_DeletesOnlyTargetIssueAndRelatedData(t *testi
 		t.Fatalf("expected 0 analysis results after delete, got %d", len(results))
 	}
 
-	attachments, err := repo.ListAttachmentsByIssue(issueCh0.ID)
+	// Assert - 연관된 첨부파일도 삭제되어야 한다
+	attachments, err := repo.ListAttachmentsByIssue(issue.ID)
 	if err != nil {
 		t.Fatalf("ListAttachmentsByIssue failed: %v", err)
 	}
