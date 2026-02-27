@@ -155,7 +155,9 @@ func (p *ProgressPanel) SetProgress(progress float64, message string) {
 func (p *ProgressPanel) SetStepProgress(stepIndex int, progress float64, message string) {
 	if stepIndex >= 0 && stepIndex < len(p.stepItems) {
 		p.stepItems[stepIndex].SetProgress(progress)
-		p.messageLabel.SetText(message)
+		fyne.Do(func() {
+			p.messageLabel.SetText(message)
+		})
 	}
 }
 
@@ -163,14 +165,16 @@ func (p *ProgressPanel) SetStepProgress(stepIndex int, progress float64, message
 func (p *ProgressPanel) Reset() {
 	p.currentPhase = state.PhaseIdle
 	p.progress = 0
-	p.progressBar.SetValue(0)
-	p.statusLabel.SetText("준비됨")
-	p.messageLabel.SetText("")
+	fyne.Do(func() {
+		p.progressBar.SetValue(0)
+		p.statusLabel.SetText("준비됨")
+		p.messageLabel.SetText("")
 
-	for _, item := range p.stepItems {
-		item.SetStatus(state.StepPending)
-		item.SetProgress(0)
-	}
+		for _, item := range p.stepItems {
+			item.SetStatus(state.StepPending)
+			item.SetProgress(0)
+		}
+	})
 }
 
 // SetError 에러 상태 표시
@@ -239,27 +243,29 @@ func (s *StepItem) SetStatus(status state.StepStatus) {
 
 	s.status = status
 
-	switch status {
-	case state.StepPending:
-		s.icon.Text = "○"
-		s.icon.Color = theme.DisabledColor()
-		s.nameLabel.TextStyle = fyne.TextStyle{}
-	case state.StepRunning:
-		s.icon.Text = "◉"
-		s.icon.Color = color.RGBA{R: 59, G: 130, B: 246, A: 255} // 파란색
-		s.nameLabel.TextStyle = fyne.TextStyle{Bold: true}
-	case state.StepCompleted:
-		s.icon.Text = "✓"
-		s.icon.Color = color.RGBA{R: 34, G: 197, B: 94, A: 255} // 녹색
-		s.nameLabel.TextStyle = fyne.TextStyle{}
-	case state.StepFailed:
-		s.icon.Text = "✗"
-		s.icon.Color = color.RGBA{R: 239, G: 68, B: 68, A: 255} // 빨간색
-		s.nameLabel.TextStyle = fyne.TextStyle{}
-	}
+	fyne.Do(func() {
+		switch status {
+		case state.StepPending:
+			s.icon.Text = "○"
+			s.icon.Color = theme.DisabledColor()
+			s.nameLabel.TextStyle = fyne.TextStyle{}
+		case state.StepRunning:
+			s.icon.Text = "◉"
+			s.icon.Color = color.RGBA{R: 59, G: 130, B: 246, A: 255} // 파란색
+			s.nameLabel.TextStyle = fyne.TextStyle{Bold: true}
+		case state.StepCompleted:
+			s.icon.Text = "✓"
+			s.icon.Color = color.RGBA{R: 34, G: 197, B: 94, A: 255} // 녹색
+			s.nameLabel.TextStyle = fyne.TextStyle{}
+		case state.StepFailed:
+			s.icon.Text = "✗"
+			s.icon.Color = color.RGBA{R: 239, G: 68, B: 68, A: 255} // 빨간색
+			s.nameLabel.TextStyle = fyne.TextStyle{}
+		}
 
-	s.icon.Refresh()
-	s.nameLabel.Refresh()
+		s.icon.Refresh()
+		s.nameLabel.Refresh()
+	})
 }
 
 // SetProgress 진행률 설정
@@ -267,7 +273,9 @@ func (s *StepItem) SetProgress(progress float64) {
 	s.progress = progress
 
 	if s.status == state.StepRunning && progress > 0 && progress < 1 {
-		s.icon.Text = fmt.Sprintf("%.0f%%", progress*100)
-		s.icon.Refresh()
+		fyne.Do(func() {
+			s.icon.Text = fmt.Sprintf("%.0f%%", progress*100)
+			s.icon.Refresh()
+		})
 	}
 }

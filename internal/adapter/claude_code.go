@@ -1,6 +1,8 @@
 package adapter
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -35,21 +37,38 @@ type PlanResult struct {
 
 // ClaudeCodeAdapter implements Claude Code CLI integration
 type ClaudeCodeAdapter struct {
-	cliPath string
-	enabled bool
-	model   string
+	cliPath        string
+	enabled        bool
+	model          string
+	hookScriptPath string
 }
 
 // NewClaudeCodeAdapter creates a new Claude Code adapter
-func NewClaudeCodeAdapter(cliPath string, enabled bool, model string) *ClaudeCodeAdapter {
+func NewClaudeCodeAdapter(cliPath string, enabled bool, model, hookScriptPath string) *ClaudeCodeAdapter {
 	if model == "" {
 		model = "claude-sonnet-4-20250514"
 	}
 	return &ClaudeCodeAdapter{
-		cliPath: cliPath,
-		enabled: enabled,
-		model:   model,
+		cliPath:        cliPath,
+		enabled:        enabled,
+		model:          model,
+		hookScriptPath: hookScriptPath,
 	}
+}
+
+// HookConfigurationError는 Claude Hook 설정 오류를 나타낸다.
+type HookConfigurationError struct {
+	Reason string
+}
+
+func (e *HookConfigurationError) Error() string {
+	return fmt.Sprintf("Claude Hook 설정 오류: %s", e.Reason)
+}
+
+// IsHookConfigurationError는 주어진 에러가 Hook 설정 오류인지 확인한다.
+func IsHookConfigurationError(err error) bool {
+	var hookErr *HookConfigurationError
+	return errors.As(err, &hookErr)
 }
 
 // GetModel returns the configured model
@@ -60,6 +79,16 @@ func (c *ClaudeCodeAdapter) GetModel() string {
 // SetModel updates the model
 func (c *ClaudeCodeAdapter) SetModel(model string) {
 	c.model = model
+}
+
+// SetHookScriptPath updates the project-specific hook script path.
+func (c *ClaudeCodeAdapter) SetHookScriptPath(path string) {
+	c.hookScriptPath = path
+}
+
+// GetHookScriptPath returns the configured hook script path.
+func (c *ClaudeCodeAdapter) GetHookScriptPath() string {
+	return c.hookScriptPath
 }
 
 // IsEnabled returns whether Claude integration is enabled
@@ -77,6 +106,99 @@ func resolveWorkDir(workDir string) (string, error) {
 		return workDir, nil
 	}
 	return absDir, nil
+}
+
+// hookSettingsFileSchema는 Claude --settings로 전달할 최소 Hook 설정 스키마다.
+type hookSettingsFileSchema struct {
+	Hooks map[string][]hookEventConfig `json:"hooks"`
+}
+
+type hookEventConfig struct {
+	Matcher string           `json:"matcher"`
+	Hooks   []hookCommandDef `json:"hooks"`
+}
+
+type hookCommandDef struct {
+	Type    string `json:"type"`
+	Command string `json:"command"`
+}
+
+// validatePathForShell은 경로에 쉘 인젝션을 유발할 수 있는 위험 문자가 포함되어 있는지 검증한다.
+func validatePathForShell(path string) error {
+	for _, r := range path {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') ||
+			r == '/' || r == '_' || r == '-' || r == '.' || r == ' ') {
+			return fmt.Errorf("path contains unsafe character: %c", r)
+		}
+	}
+	return nil
+}
+
+// prepareHookSettingsFile은 프로젝트 전용 Hook 스크립트를 검증하고 임시 settings 파일을 생성한다.
+func (c *ClaudeCodeAdapter) prepareHookSettingsFile(settingsPath string) error {
+	if strings.TrimSpace(c.hookScriptPath) == "" {
+		return &HookConfigurationError{Reason: "hook_script_path가 비어 있습니다. 설정에서 Hook 스크립트 경로를 입력해주세요"}
+	}
+
+	absHookPath, err := filepath.Abs(strings.TrimSpace(c.hookScriptPath))
+	if err != nil {
+		return &HookConfigurationError{Reason: fmt.Sprintf("Hook 스크립트 절대 경로 변환 실패: %v", err)}
+	}
+
+	// 쉘 인젝션 방지를 위한 경로 문자 검증
+	if err := validatePathForShell(absHookPath); err != nil {
+		return &HookConfigurationError{Reason: fmt.Sprintf("Hook 스크립트 경로에 허용되지 않는 문자가 포함되어 있습니다: %v", err)}
+	}
+
+	info, err := os.Stat(absHookPath)
+	if err != nil {
+		return &HookConfigurationError{Reason: fmt.Sprintf("Hook 스크립트 파일을 찾을 수 없습니다: %s", absHookPath)}
+	}
+	if info.IsDir() {
+		return &HookConfigurationError{Reason: fmt.Sprintf("Hook 스크립트 경로가 디렉터리입니다: %s", absHookPath)}
+	}
+	// 실행 권한 검증
+	if info.Mode().Perm()&0111 == 0 {
+		return &HookConfigurationError{Reason: fmt.Sprintf("Hook 스크립트에 실행 권한이 없습니다: %s (chmod +x 필요)", absHookPath)}
+	}
+
+	settings := hookSettingsFileSchema{
+		Hooks: map[string][]hookEventConfig{
+			"PreToolUse": {
+				{
+					Matcher: ".*",
+					Hooks: []hookCommandDef{
+						{
+							Type:    "command",
+							Command: absHookPath,
+						},
+					},
+				},
+			},
+			"PostToolUse": {
+				{
+					Matcher: ".*",
+					Hooks: []hookCommandDef{
+						{
+							Type:    "command",
+							Command: absHookPath,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	raw, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal hook settings: %w", err)
+	}
+
+	if err := os.WriteFile(settingsPath, raw, 0600); err != nil {
+		return fmt.Errorf("failed to write hook settings: %w", err)
+	}
+	return nil
 }
 
 // AnalyzeIssue launches Claude as a detached background process
@@ -112,9 +234,13 @@ func (c *ClaudeCodeAdapter) AnalyzeIssue(mdFilePath, prompt, workDir string) (*A
 
 	// Create a temporary prompt file (to avoid shell escaping issues)
 	promptFile := strings.TrimSuffix(mdFilePath, ".md") + "_prompt.txt"
+	settingsPath := strings.TrimSuffix(mdFilePath, ".md") + "_settings.json"
 	fullPrompt := fmt.Sprintf("%s\n\n---\n%s", prompt, string(mdContent))
 	if err := os.WriteFile(promptFile, []byte(fullPrompt), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write prompt file: %w", err)
+	}
+	if err := c.prepareHookSettingsFile(settingsPath); err != nil {
+		return nil, err
 	}
 
 	// Create a wrapper script for background execution
@@ -130,7 +256,7 @@ echo "Prompt file: %s"
 echo "Output file: %s"
 echo ""
 echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Running Claude..."
-%s --model %s --print "$(cat '%s')" --output-format text > /tmp/claude_output_$$.txt 2>&1
+%s --settings '%s' --model %s --print "$(cat '%s')" --output-format text > /tmp/claude_output_$$.txt 2>&1
 CLAUDE_EXIT=$?
 echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Claude exited with code: $CLAUDE_EXIT"
 echo "Output size: $(wc -c < /tmp/claude_output_$$.txt) bytes"
@@ -158,9 +284,9 @@ echo "---" >> "%s"
 echo "" >> "%s"
 echo "✅ 분석 완료: $(date '+%%Y-%%m-%%d %%H:%%M:%%S')" >> "%s"
 
-rm -f /tmp/claude_output_$$.txt "%s" "%s"
+rm -f /tmp/claude_output_$$.txt "%s" "%s" "%s"
 echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Done!"
-`, logFile, effectiveDir, effectiveDir, promptFile, outputPath, c.cliPath, c.model, promptFile, outputPath, outputPath, outputPath, effectiveDir, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, promptFile, scriptPath)
+`, logFile, effectiveDir, effectiveDir, promptFile, outputPath, c.cliPath, settingsPath, c.model, promptFile, outputPath, outputPath, outputPath, effectiveDir, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, promptFile, scriptPath, settingsPath)
 
 	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
 		return nil, fmt.Errorf("failed to write script: %w", err)
@@ -303,14 +429,14 @@ func BuildAnalysisPlanPrompt(issueKey, mdPath string) string {
 - 수정 이유: [왜 수정이 필요한지]
 
 수정 전:
-` + "```" + `kotlin (또는 해당 언어)
+`+"```"+`kotlin (또는 해당 언어)
 // 기존 코드
-` + "```" + `
+`+"```"+`
 
 수정 후:
-` + "```" + `kotlin
+`+"```"+`kotlin
 // 변경된 코드
-` + "```" + `
+`+"```"+`
 
 ### TEST_CHECKLIST
 - [ ] 체크 항목 1
@@ -360,6 +486,7 @@ func (c *ClaudeCodeAdapter) AnalyzeAndGeneratePlan(mdFilePath, prompt, workDir s
 	basePath := strings.TrimSuffix(mdFilePath, ".md")
 	planPath := basePath + "_plan.md"
 	promptFile := basePath + "_plan_prompt.txt"
+	settingsPath := basePath + "_plan_settings.json"
 	scriptPath := basePath + "_plan_run.sh"
 	logFile := basePath + "_plan_log.txt"
 
@@ -367,6 +494,9 @@ func (c *ClaudeCodeAdapter) AnalyzeAndGeneratePlan(mdFilePath, prompt, workDir s
 	fullPrompt := fmt.Sprintf("%s\n\n---\n%s", prompt, string(mdContent))
 	if err := os.WriteFile(promptFile, []byte(fullPrompt), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write prompt file: %w", err)
+	}
+	if err := c.prepareHookSettingsFile(settingsPath); err != nil {
+		return nil, err
 	}
 
 	// 래퍼 스크립트 생성: Claude 실행 → 결과를 plan 파일로 조립
@@ -379,7 +509,7 @@ echo "Prompt file: %s"
 echo "Plan file: %s"
 echo ""
 echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Running Claude (Phase 1 - 분석)..."
-%s --model %s --print "$(cat '%s')" --output-format text > /tmp/claude_plan_$$.txt 2>&1
+%s --settings '%s' --model %s --print "$(cat '%s')" --output-format text > /tmp/claude_plan_$$.txt 2>&1
 CLAUDE_EXIT=$?
 echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Claude exited with code: $CLAUDE_EXIT"
 echo "Output size: $(wc -c < /tmp/claude_plan_$$.txt) bytes"
@@ -443,18 +573,18 @@ cat >> "%s" << 'EXEC_SECTION'
 EXEC_SECTION
 
 echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Plan file created: %s"
-rm -f /tmp/claude_plan_$$.txt "%s"
+rm -f /tmp/claude_plan_$$.txt "%s" "%s"
 echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Phase 1 완료!"
 `,
 		logFile, effectiveDir, effectiveDir, promptFile, planPath,
-		c.cliPath, c.model, promptFile,
+		c.cliPath, settingsPath, c.model, promptFile,
 		planPath,
 		planPath, planPath, mdFilePath, planPath, planPath, planPath, planPath,
 		planPath, planPath, planPath, effectiveDir, planPath, planPath,
 		planPath, planPath, planPath, planPath, planPath,
 		planPath,
 		planPath, planPath,
-		promptFile)
+		promptFile, settingsPath)
 
 	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
 		return nil, fmt.Errorf("failed to write script: %w", err)
@@ -518,12 +648,16 @@ func (c *ClaudeCodeAdapter) ExecutePlan(planPath, workDir string) (*AnalysisResu
 	basePath := strings.TrimSuffix(planPath, "_plan.md")
 	executionPath := basePath + "_execution.md"
 	promptFile := basePath + "_exec_prompt.txt"
+	settingsPath := basePath + "_exec_settings.json"
 	scriptPath := basePath + "_exec_run.sh"
 	logFile := basePath + "_exec_log.txt"
 
 	// 프롬프트 파일 작성
 	if err := os.WriteFile(promptFile, planContent, 0644); err != nil {
 		return nil, fmt.Errorf("failed to write prompt file: %w", err)
+	}
+	if err := c.prepareHookSettingsFile(settingsPath); err != nil {
+		return nil, err
 	}
 
 	// 래퍼 스크립트 생성
@@ -536,7 +670,7 @@ echo "Prompt file: %s"
 echo "Output file: %s"
 echo ""
 echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Running Claude (Phase 2 - 실행)..."
-%s --model %s --print "$(cat '%s')" --output-format text > /tmp/claude_exec_$$.txt 2>&1
+%s --settings '%s' --model %s --print "$(cat '%s')" --output-format text > /tmp/claude_exec_$$.txt 2>&1
 CLAUDE_EXIT=$?
 echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Claude exited with code: $CLAUDE_EXIT"
 echo "Output size: $(wc -c < /tmp/claude_exec_$$.txt) bytes"
@@ -564,16 +698,16 @@ echo "---" >> "%s"
 echo "" >> "%s"
 echo "✅ 실행 완료: $(date '+%%Y-%%m-%%d %%H:%%M:%%S')" >> "%s"
 
-rm -f /tmp/claude_exec_$$.txt "%s" "%s"
+rm -f /tmp/claude_exec_$$.txt "%s" "%s" "%s"
 echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Phase 2 완료!"
 `,
 		logFile, effectiveDir, effectiveDir, promptFile, executionPath,
-		c.cliPath, c.model, promptFile,
+		c.cliPath, settingsPath, c.model, promptFile,
 		executionPath, executionPath, executionPath, effectiveDir, executionPath,
 		executionPath, executionPath, executionPath,
 		executionPath, executionPath,
 		executionPath, executionPath, executionPath, executionPath, executionPath,
-		promptFile, scriptPath)
+		promptFile, scriptPath, settingsPath)
 
 	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
 		return nil, fmt.Errorf("failed to write script: %w", err)

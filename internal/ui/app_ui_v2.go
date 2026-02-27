@@ -154,37 +154,15 @@ func (v2 *AppV2State) subscribeEvents(a *App) {
 
 	// 이슈 목록 새로고침
 	eb.Subscribe(state.EventIssueListRefresh, func(event state.Event) {
-		fyne.Do(func() {
-			data, _ := event.Data.(map[string]interface{})
-			phase, _ := data["phase"].(int)
+		data, _ := event.Data.(map[string]interface{})
+		phase, _ := data["phase"].(int)
+		a.refreshIssueListsForChannel(event.Channel, phase, v2)
+	})
 
-			switch phase {
-			case 1:
-				// 1차 완료 목록 로드 (2차 분석 대상)
-				issues, err := a.issueStore.ListIssuesByPhase(1)
-				if err == nil {
-					for i := 0; i < 3; i++ {
-						v2.analysisSelectors[i].SetPhase1Items(issues)
-					}
-				}
-			case 2:
-				// 2차 완료 목록 로드 (3차 분석 대상)
-				issues, err := a.issueStore.ListIssuesByPhase(2)
-				if err == nil {
-					for i := 0; i < 3; i++ {
-						v2.analysisSelectors[i].SetPhase2Items(issues)
-					}
-				}
-			default:
-				// 모든 목록 새로고침
-				issues1, _ := a.issueStore.ListIssuesByPhase(1)
-				issues2, _ := a.issueStore.ListIssuesByPhase(2)
-				for i := 0; i < 3; i++ {
-					v2.analysisSelectors[i].SetPhase1Items(issues1)
-					v2.analysisSelectors[i].SetPhase2Items(issues2)
-				}
-			}
-		})
+	// 이슈 삭제 요청
+	eb.Subscribe(state.EventIssueDeleteRequest, func(event state.Event) {
+		data, _ := event.Data.(map[string]interface{})
+		a.handleIssueDeleteRequestV2(event.Channel, data, v2)
 	})
 }
 
@@ -214,19 +192,7 @@ func (a *App) createMainContentV2(v2 *AppV2State) fyne.CanvasObject {
 	})
 
 	v2.sidebar.SetOnHistorySelect(func(jobID string) {
-		a.mu.Lock()
-		var job *AnalysisJob
-		for _, j := range a.completedJobs {
-			if j.IssueKey == jobID {
-				job = j
-				break
-			}
-		}
-		a.mu.Unlock()
-
-		if job != nil {
-			a.loadJobResultToChannel(job)
-		}
+		a.loadHistoryRecordToChannelV2(jobID, v2)
 	})
 
 	v2.sidebar.SetOnSettingsClick(func() {
@@ -295,7 +261,7 @@ func (a *App) createChannelTabV2(channelIndex int, v2 *AppV2State) fyne.CanvasOb
 		ch.ProjectPathEntry.SetText(a.config.Claude.ChannelPaths[channelIndex])
 	}
 
-	// 버튼들 - 중지와 계획 실행만 유지
+	// 버튼들 - V2에서는 중지 버튼만 노출 (계획 실행은 3차 흐름에서만 처리)
 	stopBtn := widget.NewButtonWithIcon("중지", theme.MediaStopIcon(), func() {
 		a.stopQueueCurrent(channelIndex)
 	})
@@ -306,8 +272,9 @@ func (a *App) createChannelTabV2(channelIndex int, v2 *AppV2State) fyne.CanvasOb
 	})
 	ch.ExecutePlanBtn.Importance = widget.WarningImportance
 	ch.ExecutePlanBtn.Disable()
+	ch.ExecutePlanBtn.Hide()
 
-	buttonRow := container.NewHBox(stopBtn, ch.ExecutePlanBtn)
+	buttonRow := container.NewHBox(stopBtn)
 
 	// 상태 라벨
 	ch.StatusLabel = widget.NewLabel(fmt.Sprintf("%s 대기 중...", queue.Name))
@@ -325,9 +292,7 @@ func (a *App) createChannelTabV2(channelIndex int, v2 *AppV2State) fyne.CanvasOb
 	resultPanel.SetOnCopyAnalysis(func() {
 		a.onCopyChannelAnalysis(channelIndex)
 	})
-	resultPanel.SetOnExecutePlan(func() {
-		a.onExecuteChannelPlan(channelIndex)
-	})
+	resultPanel.DisableExecutePlan()
 
 	// 기존 위젯 참조 연결 (호환성)
 	ch.ProgressBar = widget.NewProgressBar()
@@ -396,7 +361,9 @@ func (a *App) onChannelProcessV2(channelIndex int, v2 *AppV2State) {
 	v2.appState.UpdatePhase(channelIndex, state.PhaseFetchingIssue)
 	v2.appState.AddLog(channelIndex, state.LogInfo, "분석 시작: "+url, "App")
 
-	ch.StatusLabel.SetText("분석 중...")
+	fyne.Do(func() {
+		ch.StatusLabel.SetText("분석 중...")
+	})
 
 	go func() {
 		logger.Debug("onChannelProcessV2: goroutine started for url=%s", url)
@@ -450,7 +417,7 @@ func (a *App) onChannelProcessV2(channelIndex int, v2 *AppV2State) {
 
 		// 모든 UI 업데이트를 메인 스레드에서 실행
 		fyne.Do(func() {
-			v2.appState.UpdatePhase(channelIndex, state.PhaseCompleted)
+			v2.appState.UpdatePhase(channelIndex, state.PhasePhase1Complete)
 
 			ch.CurrentDoc = result.Document
 			ch.CurrentMDPath = result.MDPath
@@ -462,8 +429,8 @@ func (a *App) onChannelProcessV2(channelIndex int, v2 *AppV2State) {
 				ch.StatusLabel.SetText(fmt.Sprintf("✅ %s 분석 완료", result.Document.IssueKey))
 				v2.appState.AddLog(channelIndex, state.LogInfo, "분석 완료: "+result.Document.IssueKey, "App")
 
-				// DB에 저장
-				err := v2.appState.SaveIssueToDBAfterPhase1(
+				// DB에 저장 (채널별 Upsert)
+				savedIssue, err := v2.appState.SaveIssueToDBAfterPhase1(
 					channelIndex,
 					result.Document.IssueKey,
 					result.Document.Title,
@@ -475,16 +442,14 @@ func (a *App) onChannelProcessV2(channelIndex int, v2 *AppV2State) {
 					logger.Debug("onChannelProcessV2: DB save error: %v", err)
 				}
 
-				// 이력에 추가
-				v2.sidebar.AddHistoryItem(result.Document.IssueKey, result.Document.IssueKey, "완료", "")
-
-				// 모든 채널의 AnalysisSelector 갱신 (1차 완료 목록)
-				allIssues, loadErr := a.issueStore.ListIssuesByPhase(1)
-				if loadErr == nil {
-					for i := 0; i < 3; i++ {
-						v2.analysisSelectors[i].SetPhase1Items(allIssues)
-					}
+				// 이력에 추가 (채널+이슈ID 조합으로 충돌 방지)
+				if savedIssue != nil {
+					historyID := buildHistoryID(channelIndex, savedIssue.ID)
+					v2.sidebar.AddHistoryItem(historyID, result.Document.IssueKey, "완료", "")
 				}
+
+				// 현재 채널의 1차 완료 목록 갱신
+				a.refreshIssueListsForChannel(channelIndex, 1, v2)
 			}
 			v2.progressPanels[channelIndex].SetComplete()
 
@@ -502,13 +467,17 @@ func (a *App) RunV2() {
 	a.mainWindow.CenterOnScreen()
 
 	v2 := a.initV2State()
+	a.v2State = v2
 	content := a.createMainContentV2(v2)
 	a.mainWindow.SetContent(content)
 
 	// DB에서 이전 분석 이력 로드
 	a.loadHistoryFromDB(v2)
-
-	a.loadPreviousAnalysis()
+	if a.issueStore == nil {
+		a.loadPreviousAnalysis()
+	} else if allIssues, err := a.issueStore.ListAllIssues(); err == nil && len(allIssues) == 0 {
+		a.loadPreviousAnalysis()
+	}
 
 	// Note: DB close는 main.go의 defer app.Close()에서 처리
 
@@ -522,8 +491,7 @@ func (a *App) loadHistoryFromDB(v2 *AppV2State) {
 		return
 	}
 
-	// Phase 1 완료된 모든 이슈 로드
-	issues, err := a.issueStore.ListIssuesByPhase(1)
+	issues, err := a.issueStore.ListAllIssues()
 	if err != nil {
 		logger.Debug("loadHistoryFromDB: failed to load issues: %v", err)
 		return
@@ -531,178 +499,24 @@ func (a *App) loadHistoryFromDB(v2 *AppV2State) {
 
 	logger.Debug("loadHistoryFromDB: loaded %d issues from DB", len(issues))
 
-	// 사이드바에 이력 추가
+	// 사이드바 이력 로드 (채널+이슈ID 복합 키 사용)
 	for _, issue := range issues {
-		v2.sidebar.AddHistoryItem(issue.IssueKey, issue.IssueKey, "완료", "")
+		historyID := buildHistoryID(issue.ChannelIndex, issue.ID)
+		v2.sidebar.AddHistoryItem(historyID, issue.IssueKey, "완료", "")
 	}
 
-	// 모든 채널의 AnalysisSelector에 동일한 Phase 1 완료 항목 로드
+	// 채널별 1차/2차 완료 목록 로드
 	for channelIdx := 0; channelIdx < 3; channelIdx++ {
-		logger.Debug("loadHistoryFromDB: loading %d issues to channel %d AnalysisSelector", len(issues), channelIdx)
-		v2.analysisSelectors[channelIdx].SetPhase1Items(issues)
+		a.refreshIssueListsForChannel(channelIdx, 0, v2)
 	}
 }
 
 // executePhase2ForV2 V2용 2차 분석 (AI 플랜 생성)
 func (a *App) executePhase2ForV2(channelIndex int, records []*domain.IssueRecord, v2 *AppV2State) {
-	logger.Debug("executePhase2ForV2: start, channel=%d, record_count=%d", channelIndex, len(records))
-
-	workDir := a.config.Claude.ChannelPaths[channelIndex]
-	if workDir == "" {
-		logger.Debug("executePhase2ForV2: workDir is empty for channel %d", channelIndex)
-		fyne.Do(func() {
-			v2.appState.FailJob(channelIndex, "", fmt.Errorf("채널 %d 프로젝트 경로 미설정", channelIndex+1))
-			v2.progressPanels[channelIndex].SetError("프로젝트 경로 미설정")
-		})
-		return
-	}
-
-	totalRecords := len(records)
-	for idx, record := range records {
-		logger.Debug("executePhase2ForV2: processing record id=%d, key=%s, mdPath=%s", record.ID, record.IssueKey, record.MDPath)
-
-		// 진행률 업데이트 - 시작 (75% → 95% 범위)
-		progress := 0.75 + (float64(idx) / float64(totalRecords) * 0.20)
-		fyne.Do(func() {
-			v2.progressPanels[channelIndex].SetProgress(progress, fmt.Sprintf("AI 플랜 생성 중: %s (%d/%d)", record.IssueKey, idx+1, totalRecords))
-		})
-
-		// MD 파일 경로 확인
-		mdPath := record.MDPath
-		if mdPath == "" {
-			logger.Debug("executePhase2ForV2: mdPath is empty for record %s", record.IssueKey)
-			continue
-		}
-
-		// AI 플랜 생성
-		prompt := a.config.AI.PromptTemplate
-		logger.Debug("executePhase2ForV2: calling AnalyzeAndGeneratePlan, mdPath=%s, workDir=%s", mdPath, workDir)
-
-		result, err := a.claudeAdapter.AnalyzeAndGeneratePlan(mdPath, prompt, workDir)
-
-		fyne.Do(func() {
-			if err != nil {
-				logger.Debug("executePhase2ForV2: AnalyzeAndGeneratePlan error: %v", err)
-				v2.appState.FailJob(channelIndex, record.IssueKey, err)
-				v2.progressPanels[channelIndex].SetError(err.Error())
-				v2.appState.UpdatePhase(channelIndex, state.PhaseFailed)
-				return
-			}
-
-			logger.Debug("executePhase2ForV2: AnalyzeAndGeneratePlan success")
-
-			// 성공 시 Phase 변경 및 진행률 업데이트
-			v2.appState.UpdatePhase(channelIndex, state.PhaseAIPlanReady)
-			v2.progressPanels[channelIndex].SetProgress(0.95, "AI 플랜 생성 완료")
-
-			// 결과 표시
-			if result != nil {
-				v2.resultPanels[channelIndex].SetAnalysis(fmt.Sprintf("AI 플랜 생성 완료\n경로: %s", result.PlanPath))
-				a.channels[channelIndex].CurrentPlanPath = result.PlanPath
-			}
-
-			// DB에서 이슈 Phase 업데이트
-			record.Phase = 2
-			if a.issueStore != nil {
-				a.issueStore.UpdateIssue(record)
-			}
-
-			// Phase2 완료 이벤트 발행
-			v2.appState.EventBus.Publish(state.Event{
-				Type:    state.EventPhase2Complete,
-				Channel: channelIndex,
-				Data:    record,
-			})
-
-			// 3차 분석 대상 목록 자동 갱신
-			v2.appState.EventBus.Publish(state.Event{
-				Type:    state.EventIssueListRefresh,
-				Channel: channelIndex,
-				Data:    map[string]interface{}{"phase": 2},
-			})
-
-			logger.Debug("executePhase2ForV2: completed for record %s", record.IssueKey)
-		})
-	}
-
-	// 모든 레코드 처리 완료 후 최종 완료 표시
-	fyne.Do(func() {
-		v2.progressPanels[channelIndex].SetComplete()
-	})
+	a.runPhase2BatchV2(channelIndex, records, v2)
 }
 
 // executePhase3ForV2 V2용 3차 분석 (AI 실행)
 func (a *App) executePhase3ForV2(channelIndex int, records []*domain.IssueRecord, v2 *AppV2State) {
-	logger.Debug("executePhase3ForV2: start, channel=%d, record_count=%d", channelIndex, len(records))
-
-	workDir := a.config.Claude.ChannelPaths[channelIndex]
-	if workDir == "" {
-		logger.Debug("executePhase3ForV2: workDir is empty for channel %d", channelIndex)
-		fyne.Do(func() {
-			v2.appState.FailJob(channelIndex, "", fmt.Errorf("채널 %d 프로젝트 경로 미설정", channelIndex+1))
-			v2.progressPanels[channelIndex].SetError("프로젝트 경로 미설정")
-		})
-		return
-	}
-
-	// 시작 진행률 설정
-	fyne.Do(func() {
-		v2.progressPanels[channelIndex].SetProgress(0.75, "AI 플랜 실행 준비 중...")
-	})
-
-	totalRecords := len(records)
-	for idx, record := range records {
-		logger.Debug("executePhase3ForV2: processing record id=%d, key=%s", record.ID, record.IssueKey)
-
-		// 진행률 업데이트 - 시작 (75% → 95% 범위)
-		progress := 0.75 + (float64(idx) / float64(totalRecords) * 0.20)
-		fyne.Do(func() {
-			v2.progressPanels[channelIndex].SetProgress(progress, fmt.Sprintf("AI 플랜 실행 중: %s (%d/%d)", record.IssueKey, idx+1, totalRecords))
-		})
-
-		// 플랜 파일 경로 - 채널의 CurrentPlanPath 사용
-		planPath := a.channels[channelIndex].CurrentPlanPath
-		if planPath == "" {
-			logger.Debug("executePhase3ForV2: planPath is empty for channel %d", channelIndex)
-			continue
-		}
-
-		// AI 플랜 실행
-		logger.Debug("executePhase3ForV2: calling ExecutePlan, planPath=%s, workDir=%s", planPath, workDir)
-		result, err := a.claudeAdapter.ExecutePlan(planPath, workDir)
-
-		fyne.Do(func() {
-			if err != nil {
-				logger.Debug("executePhase3ForV2: ExecutePlan error: %v", err)
-				v2.appState.FailJob(channelIndex, record.IssueKey, err)
-				v2.progressPanels[channelIndex].SetError(err.Error())
-				v2.appState.UpdatePhase(channelIndex, state.PhaseFailed)
-				return
-			}
-
-			logger.Debug("executePhase3ForV2: ExecutePlan success")
-
-			// 성공 시 Phase 변경
-			v2.appState.UpdatePhase(channelIndex, state.PhaseCompleted)
-
-			// 결과 표시
-			if result != nil {
-				v2.resultPanels[channelIndex].SetAnalysis(fmt.Sprintf("AI 실행 완료\n출력: %s", result.OutputPath))
-			}
-
-			// Phase3 완료 이벤트 발행
-			v2.appState.EventBus.Publish(state.Event{
-				Type:    state.EventPhase3Complete,
-				Channel: channelIndex,
-				Data:    record,
-			})
-
-			logger.Debug("executePhase3ForV2: completed for record %s", record.IssueKey)
-		})
-	}
-
-	// 모든 레코드 처리 완료 후 최종 완료 표시
-	fyne.Do(func() {
-		v2.progressPanels[channelIndex].SetComplete()
-	})
+	a.runPhase3BatchV2(channelIndex, records, v2)
 }

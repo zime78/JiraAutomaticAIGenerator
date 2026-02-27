@@ -27,12 +27,13 @@ const (
 	EventHistoryAdded  EventType = "history.added"
 
 	// 신규 이벤트 타입
-	EventSidebarAction    EventType = "sidebar.action"       // Sidebar에서 액션 발생
-	EventPhase1Complete   EventType = "phase1.complete"      // 1차 분석 완료
-	EventPhase2Complete   EventType = "phase2.complete"      // 2차 분석 완료 (Plan 준비됨)
-	EventPhase3Complete   EventType = "phase3.complete"      // 3차 분석 완료 (실행 완료)
-	EventDBSync           EventType = "db.sync"              // DB 동기화 완료
-	EventIssueListRefresh EventType = "issue.list.refresh"   // 이슈 목록 갱신 필요
+	EventSidebarAction      EventType = "sidebar.action"       // Sidebar에서 액션 발생
+	EventPhase1Complete     EventType = "phase1.complete"      // 1차 분석 완료
+	EventPhase2Complete     EventType = "phase2.complete"      // 2차 분석 완료 (Plan 준비됨)
+	EventPhase3Complete     EventType = "phase3.complete"      // 3차 분석 완료 (실행 완료)
+	EventDBSync             EventType = "db.sync"              // DB 동기화 완료
+	EventIssueListRefresh   EventType = "issue.list.refresh"   // 이슈 목록 갱신 필요
+	EventIssueDeleteRequest EventType = "issue.delete.request" // 이슈 삭제 요청
 )
 
 // ProcessPhase 처리 단계 정의

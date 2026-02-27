@@ -211,11 +211,13 @@ func (r *ResultPanel) GetAnalysis() string {
 func (r *ResultPanel) Reset() {
 	r.issueViewer.Reset()
 	r.analysisViewer.Reset()
-	r.copyIssueBtn.Disable()
-	r.copyAnalysisBtn.Disable()
-	r.exportBtn.Disable()
-	r.executePlanBtn.Disable()
-	r.tabs.SelectIndex(0)
+	fyne.Do(func() {
+		r.copyIssueBtn.Disable()
+		r.copyAnalysisBtn.Disable()
+		r.exportBtn.Disable()
+		r.executePlanBtn.Disable()
+		r.tabs.SelectIndex(0)
+	})
 }
 
 // ShowIssueSearch 이슈 정보 검색 표시

@@ -35,10 +35,11 @@ type AIConfig struct {
 
 // ClaudeConfig holds Claude Code CLI settings
 type ClaudeConfig struct {
-	CLIPath      string
-	ChannelPaths [3]string // 채널별 프로젝트 경로
-	Enabled      bool
-	Model        string // Claude 모델 (claude-sonnet-4-20250514, claude-opus-4-20250514 등)
+	CLIPath        string
+	ChannelPaths   [3]string // 채널별 프로젝트 경로
+	Enabled        bool
+	Model          string // Claude 모델 (claude-sonnet-4-20250514, claude-opus-4-20250514 등)
+	HookScriptPath string // Claude 실행 시 강제 적용할 프로젝트 전용 Hook 스크립트 경로
 }
 
 // Available Claude models
@@ -80,6 +81,7 @@ func Load(path string) (*Config, error) {
 	}
 	config.Claude.Enabled = claudeSection.Key("enabled").MustBool(false)
 	config.Claude.Model = claudeSection.Key("model").MustString("claude-sonnet-4-20250514")
+	config.Claude.HookScriptPath = claudeSection.Key("hook_script_path").MustString("")
 
 	return config, nil
 }
@@ -114,6 +116,16 @@ func (c *Config) Validate() error {
 	if c.Jira.APIKey == "" {
 		return fmt.Errorf("jira.api_key is required")
 	}
+	if c.Claude.Enabled {
+		for idx, path := range c.Claude.ChannelPaths {
+			if path == "" {
+				return fmt.Errorf("claude.project_path_%d is required when claude.enabled=true", idx+1)
+			}
+		}
+		if c.Claude.HookScriptPath == "" {
+			return fmt.Errorf("claude.hook_script_path is required when claude.enabled=true")
+		}
+	}
 	return nil
 }
 
@@ -143,6 +155,7 @@ func (c *Config) Save(path string) error {
 	claudeSection.NewKey("project_path_3", c.Claude.ChannelPaths[2])
 	claudeSection.NewKey("enabled", fmt.Sprintf("%v", c.Claude.Enabled))
 	claudeSection.NewKey("model", c.Claude.Model)
+	claudeSection.NewKey("hook_script_path", c.Claude.HookScriptPath)
 
 	return cfg.SaveTo(path)
 }

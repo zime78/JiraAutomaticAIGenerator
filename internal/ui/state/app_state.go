@@ -99,21 +99,21 @@ func (s StepStatus) String() string {
 
 // JobData 작업 데이터
 type JobData struct {
-	ID           string
-	IssueKey     string
-	MDPath       string
-	PlanPath     string
-	AnalysisPath string
+	ID            string
+	IssueKey      string
+	MDPath        string
+	PlanPath      string
+	AnalysisPath  string
 	ExecutionPath string
-	ScriptPath   string
-	LogPath      string
-	Phase        ProcessPhase
-	ChannelIndex int
-	StartTime    time.Time
-	EndTime      time.Time
-	Duration     string
-	Status       JobStatus
-	Error        string
+	ScriptPath    string
+	LogPath       string
+	Phase         ProcessPhase
+	ChannelIndex  int
+	StartTime     time.Time
+	EndTime       time.Time
+	Duration      string
+	Status        JobStatus
+	Error         string
 }
 
 // JobStatus 작업 상태
@@ -489,10 +489,11 @@ func (s *AppState) LoadFromDB() error {
 	return nil
 }
 
-// SaveIssueToDBAfterPhase1 1차 분석 완료 후 DB에 저장
-func (s *AppState) SaveIssueToDBAfterPhase1(channelIndex int, issueKey, summary, description, jiraURL, mdPath string) error {
+// SaveIssueToDBAfterPhase1 1차 분석 완료 후 DB에 저장한다.
+// 동일 이슈 키라도 채널이 다르면 독립 레코드로 유지하기 위해 Upsert를 사용한다.
+func (s *AppState) SaveIssueToDBAfterPhase1(channelIndex int, issueKey, summary, description, jiraURL, mdPath string) (*domain.IssueRecord, error) {
 	if s.IssueStore == nil {
-		return nil // DB가 없으면 스킵
+		return nil, nil // DB가 없으면 스킵
 	}
 
 	issue := &domain.IssueRecord{
@@ -506,7 +507,10 @@ func (s *AppState) SaveIssueToDBAfterPhase1(channelIndex int, issueKey, summary,
 		ChannelIndex: channelIndex,
 	}
 
-	return s.IssueStore.CreateIssue(issue)
+	if err := s.IssueStore.UpsertIssue(issue); err != nil {
+		return nil, err
+	}
+	return issue, nil
 }
 
 // UpdateIssuePhase 이슈 단계 업데이트

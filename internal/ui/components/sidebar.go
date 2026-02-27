@@ -169,12 +169,13 @@ func (s *Sidebar) onAnalyzeClick() {
 		return
 	}
 
-	logger.Debug("onAnalyzeClick: url=%s, channel=%d", url, s.channelIdx)
+	channel := s.activeChannel
+	logger.Debug("onAnalyzeClick: url=%s, channel=%d", url, channel)
 
 	// EventSidebarAction 발행
 	s.eventBus.Publish(state.Event{
 		Type:    state.EventSidebarAction,
-		Channel: s.channelIdx,
+		Channel: channel,
 		Data: map[string]interface{}{
 			"action": "analyze",
 			"url":    url,
@@ -246,6 +247,13 @@ func (s *Sidebar) ClearQueue() {
 func (s *Sidebar) AddHistoryItem(id, issueKey, status, duration string) {
 	fyne.Do(func() {
 		s.historyPanel.AddItem(id, issueKey, status, duration)
+	})
+}
+
+// RemoveHistoryItem 이력에서 항목 제거
+func (s *Sidebar) RemoveHistoryItem(id string) {
+	fyne.Do(func() {
+		s.historyPanel.RemoveItem(id)
 	})
 }
 
@@ -466,6 +474,17 @@ func (h *HistoryPanel) AddItem(id, issueKey, status, duration string) {
 		h.items = h.items[:50]
 	}
 
+	h.list.Refresh()
+}
+
+// RemoveItem 항목 제거
+func (h *HistoryPanel) RemoveItem(id string) {
+	for i, item := range h.items {
+		if item.ID == id {
+			h.items = append(h.items[:i], h.items[i+1:]...)
+			break
+		}
+	}
 	h.list.Refresh()
 }
 

@@ -331,3 +331,182 @@ func TestDeleteIssue(t *testing.T) {
 		t.Error("Expected error when getting deleted issue")
 	}
 }
+
+func TestCreateIssue_AllowsSameIssueKeyAcrossChannels(t *testing.T) {
+	// Arrange
+	dbPath := "test.db"
+	defer os.Remove(dbPath)
+
+	repo, err := NewSQLiteRepository(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to create repository: %v", err)
+	}
+	defer repo.Close()
+
+	issueChannel1 := &domain.IssueRecord{
+		IssueKey:     "TEST-500",
+		Summary:      "channel 1 issue",
+		Phase:        1,
+		Status:       "active",
+		ChannelIndex: 1,
+	}
+	issueChannel2 := &domain.IssueRecord{
+		IssueKey:     "TEST-500",
+		Summary:      "channel 2 issue",
+		Phase:        1,
+		Status:       "active",
+		ChannelIndex: 2,
+	}
+
+	// Act
+	if err := repo.CreateIssue(issueChannel1); err != nil {
+		t.Fatalf("CreateIssue(channel1) failed: %v", err)
+	}
+	if err := repo.CreateIssue(issueChannel2); err != nil {
+		t.Fatalf("CreateIssue(channel2) failed: %v", err)
+	}
+
+	// Assert
+	got1, err := repo.GetIssueByKeyAndChannel("TEST-500", 1)
+	if err != nil {
+		t.Fatalf("GetIssueByKeyAndChannel(channel1) failed: %v", err)
+	}
+	got2, err := repo.GetIssueByKeyAndChannel("TEST-500", 2)
+	if err != nil {
+		t.Fatalf("GetIssueByKeyAndChannel(channel2) failed: %v", err)
+	}
+	if got1.ID == got2.ID {
+		t.Fatalf("Expected different records per channel, got same ID=%d", got1.ID)
+	}
+}
+
+func TestUpsertIssue_UpdatesExistingByChannel(t *testing.T) {
+	// Arrange
+	dbPath := "test.db"
+	defer os.Remove(dbPath)
+
+	repo, err := NewSQLiteRepository(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to create repository: %v", err)
+	}
+	defer repo.Close()
+
+	original := &domain.IssueRecord{
+		IssueKey:     "TEST-501",
+		Summary:      "original",
+		Phase:        1,
+		Status:       "active",
+		ChannelIndex: 1,
+	}
+	if err := repo.CreateIssue(original); err != nil {
+		t.Fatalf("CreateIssue failed: %v", err)
+	}
+
+	upsert := &domain.IssueRecord{
+		IssueKey:     "TEST-501",
+		Summary:      "updated by upsert",
+		Phase:        2,
+		Status:       "active",
+		ChannelIndex: 1,
+	}
+
+	// Act
+	if err := repo.UpsertIssue(upsert); err != nil {
+		t.Fatalf("UpsertIssue failed: %v", err)
+	}
+
+	// Assert
+	got, err := repo.GetIssueByKeyAndChannel("TEST-501", 1)
+	if err != nil {
+		t.Fatalf("GetIssueByKeyAndChannel failed: %v", err)
+	}
+	if got.Summary != "updated by upsert" {
+		t.Fatalf("Expected updated summary, got %s", got.Summary)
+	}
+	if got.Phase != 2 {
+		t.Fatalf("Expected phase 2, got %d", got.Phase)
+	}
+}
+
+func TestDeleteIssueByIDAndChannel_DeletesOnlyTargetIssueAndRelatedData(t *testing.T) {
+	// Arrange
+	dbPath := "test.db"
+	defer os.Remove(dbPath)
+
+	repo, err := NewSQLiteRepository(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to create repository: %v", err)
+	}
+	defer repo.Close()
+
+	issueCh0 := &domain.IssueRecord{
+		IssueKey:     "TEST-700",
+		Summary:      "channel 0 issue",
+		Phase:        2,
+		Status:       "active",
+		ChannelIndex: 0,
+	}
+	issueCh1 := &domain.IssueRecord{
+		IssueKey:     "TEST-700",
+		Summary:      "channel 1 issue",
+		Phase:        2,
+		Status:       "active",
+		ChannelIndex: 1,
+	}
+
+	if err := repo.CreateIssue(issueCh0); err != nil {
+		t.Fatalf("CreateIssue(channel0) failed: %v", err)
+	}
+	if err := repo.CreateIssue(issueCh1); err != nil {
+		t.Fatalf("CreateIssue(channel1) failed: %v", err)
+	}
+
+	if err := repo.CreateAnalysisResult(&domain.AnalysisResult{
+		IssueID:       issueCh0.ID,
+		AnalysisPhase: 2,
+		Status:        "completed",
+	}); err != nil {
+		t.Fatalf("CreateAnalysisResult failed: %v", err)
+	}
+	if err := repo.CreateAttachment(&domain.AttachmentRecord{
+		IssueID:   issueCh0.ID,
+		Filename:  "test.png",
+		LocalPath: "/tmp/test.png",
+		MimeType:  "image/png",
+		IsVideo:   false,
+	}); err != nil {
+		t.Fatalf("CreateAttachment failed: %v", err)
+	}
+
+	// Act
+	if err := repo.DeleteIssueByIDAndChannel(issueCh0.ID, 0); err != nil {
+		t.Fatalf("DeleteIssueByIDAndChannel failed: %v", err)
+	}
+
+	// Assert - 대상 채널 이슈는 삭제되어야 한다.
+	if _, err := repo.GetIssueByKeyAndChannel("TEST-700", 0); err == nil {
+		t.Fatal("expected channel 0 issue to be deleted")
+	}
+
+	// Assert - 다른 채널 이슈는 유지되어야 한다.
+	if _, err := repo.GetIssueByKeyAndChannel("TEST-700", 1); err != nil {
+		t.Fatalf("expected channel 1 issue to remain, got error: %v", err)
+	}
+
+	// Assert - 연관된 분석 결과/첨부도 함께 삭제되어야 한다.
+	results, err := repo.ListAnalysisResultsByIssue(issueCh0.ID)
+	if err != nil {
+		t.Fatalf("ListAnalysisResultsByIssue failed: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected 0 analysis results after delete, got %d", len(results))
+	}
+
+	attachments, err := repo.ListAttachmentsByIssue(issueCh0.ID)
+	if err != nil {
+		t.Fatalf("ListAttachmentsByIssue failed: %v", err)
+	}
+	if len(attachments) != 0 {
+		t.Fatalf("expected 0 attachments after delete, got %d", len(attachments))
+	}
+}

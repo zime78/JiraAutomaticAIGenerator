@@ -16,5 +16,7 @@ cli_path = claude
 project_path_1 = /path/to/your/project1
 project_path_2 = /path/to/your/project2
 project_path_3 = /path/to/your/project3
+# 프로젝트 전용 Claude Hook 스크립트 경로 (필수)
+hook_script_path = /Users/your-user/Git/JiraAutomaticAIGenerator/scripts/claude_hook.sh
 # 분석 요청 활성화
 enabled = true

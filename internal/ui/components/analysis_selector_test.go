@@ -380,7 +380,7 @@ func TestAnalysisSelector_PhaseChangeUpdatesUI(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Assert
-	if selector.phase2Status.Text != "AI 플랜 준비됨" {
+	if selector.phase2Status.Text != "🟢 AI 플랜 준비 완료" {
 		t.Errorf("Expected status 'AI 플랜 준비됨', got '%s'", selector.phase2Status.Text)
 	}
 
@@ -406,7 +406,7 @@ func TestAnalysisSelector_Phase1CompleteRefreshesLists(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Assert
-	if selector.phase2Status.Text != "새 항목 추가됨 - 목록을 새로고침하세요" {
+	if selector.phase2Status.Text != "새 항목이 반영되었습니다 (체크 후 AI 플랜 생성)" {
 		t.Errorf("Expected refresh message, got '%s'", selector.phase2Status.Text)
 	}
 }
@@ -435,11 +435,101 @@ func TestAnalysisSelector_Phase2CompleteRefreshesPhase3List(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Assert
-	if selector.phase3Status.Text != "새 항목 추가됨 - 목록을 새로고침하세요" {
+	if selector.phase3Status.Text != "새 항목이 반영되었습니다 (체크 후 AI 실행)" {
 		t.Errorf("Expected refresh message, got '%s'", selector.phase3Status.Text)
 	}
 
 	if selector.startPhase2.Disabled() {
 		t.Error("Expected startPhase2 button to be re-enabled after phase2 completion")
+	}
+}
+
+func TestAnalysisSelector_OnDeletePhase2Item_PublishesEvent(t *testing.T) {
+	// Arrange
+	eventBus := state.NewEventBus()
+	selector := NewAnalysisSelector(eventBus, 0)
+	testItem := &domain.IssueRecord{
+		ID:           11,
+		IssueKey:     "ISSUE-DEL-1",
+		Summary:      "Delete Test Item",
+		Phase:        2,
+		ChannelIndex: 0,
+	}
+
+	eventReceived := make(chan state.Event, 1)
+	eventBus.Subscribe(state.EventIssueDeleteRequest, func(event state.Event) {
+		eventReceived <- event
+	})
+
+	// Act
+	selector.onDeletePhase2Item(testItem)
+
+	// Assert
+	select {
+	case event := <-eventReceived:
+		if event.Channel != 0 {
+			t.Fatalf("expected channel 0, got %d", event.Channel)
+		}
+		payload, ok := event.Data.(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected payload map, got %T", event.Data)
+		}
+		if payload["listPhase"] != 2 {
+			t.Fatalf("expected listPhase=2, got %v", payload["listPhase"])
+		}
+		issue, ok := payload["issueRecord"].(*domain.IssueRecord)
+		if !ok {
+			t.Fatalf("expected issueRecord type *domain.IssueRecord, got %T", payload["issueRecord"])
+		}
+		if issue.ID != testItem.ID {
+			t.Fatalf("expected issue id %d, got %d", testItem.ID, issue.ID)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected delete request event to be published")
+	}
+}
+
+func TestAnalysisSelector_OnDeletePhase3Item_PublishesEvent(t *testing.T) {
+	// Arrange
+	eventBus := state.NewEventBus()
+	selector := NewAnalysisSelector(eventBus, 2)
+	testItem := &domain.IssueRecord{
+		ID:           22,
+		IssueKey:     "ISSUE-DEL-2",
+		Summary:      "Delete Test Item 2",
+		Phase:        3,
+		ChannelIndex: 2,
+	}
+
+	eventReceived := make(chan state.Event, 1)
+	eventBus.Subscribe(state.EventIssueDeleteRequest, func(event state.Event) {
+		eventReceived <- event
+	})
+
+	// Act
+	selector.onDeletePhase3Item(testItem)
+
+	// Assert
+	select {
+	case event := <-eventReceived:
+		if event.Channel != 2 {
+			t.Fatalf("expected channel 2, got %d", event.Channel)
+		}
+		payload, ok := event.Data.(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected payload map, got %T", event.Data)
+		}
+		if payload["listPhase"] != 3 {
+			t.Fatalf("expected listPhase=3, got %v", payload["listPhase"])
+		}
+		issue, ok := payload["issueRecord"].(*domain.IssueRecord)
+		if !ok {
+			t.Fatalf("expected issueRecord type *domain.IssueRecord, got %T", payload["issueRecord"])
+		}
+		if issue.IssueKey != testItem.IssueKey {
+			t.Fatalf("expected issue key %s, got %s", testItem.IssueKey, issue.IssueKey)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected delete request event to be published")
 	}
 }

@@ -9,10 +9,10 @@ import (
 )
 
 func TestNewCompletedList(t *testing.T) {
-	test.NewApp()
-	defer test.NewApp()
+	app := test.NewApp()
+	defer app.Quit()
 
-	list := NewCompletedList()
+	list := NewCompletedList(2)
 
 	if list == nil {
 		t.Fatal("NewCompletedList() returned nil")
@@ -28,10 +28,10 @@ func TestNewCompletedList(t *testing.T) {
 }
 
 func TestCompletedList_SetItems(t *testing.T) {
-	test.NewApp()
-	defer test.NewApp()
+	app := test.NewApp()
+	defer app.Quit()
 
-	list := NewCompletedList()
+	list := NewCompletedList(2)
 
 	items := []*domain.IssueRecord{
 		{
@@ -60,10 +60,10 @@ func TestCompletedList_SetItems(t *testing.T) {
 }
 
 func TestCompletedList_GetSelectedIDs(t *testing.T) {
-	test.NewApp()
-	defer test.NewApp()
+	app := test.NewApp()
+	defer app.Quit()
 
-	list := NewCompletedList()
+	list := NewCompletedList(2)
 
 	items := []*domain.IssueRecord{
 		{ID: 1, IssueKey: "TEST-1"},
@@ -95,10 +95,10 @@ func TestCompletedList_GetSelectedIDs(t *testing.T) {
 }
 
 func TestCompletedList_EmptySelection(t *testing.T) {
-	test.NewApp()
-	defer test.NewApp()
+	app := test.NewApp()
+	defer app.Quit()
 
-	list := NewCompletedList()
+	list := NewCompletedList(2)
 
 	items := []*domain.IssueRecord{
 		{ID: 1, IssueKey: "TEST-1"},

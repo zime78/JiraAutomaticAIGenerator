@@ -43,9 +43,12 @@ type Clipboard interface {
 // IssueStore defines the interface for persisting issue records
 type IssueStore interface {
 	CreateIssue(issue *domain.IssueRecord) error
+	UpsertIssue(issue *domain.IssueRecord) error
 	GetIssue(issueKey string) (*domain.IssueRecord, error)
+	GetIssueByKeyAndChannel(issueKey string, channelIndex int) (*domain.IssueRecord, error)
 	UpdateIssue(issue *domain.IssueRecord) error
 	DeleteIssue(issueKey string) error
+	DeleteIssueByIDAndChannel(issueID int64, channelIndex int) error
 	ListIssuesByPhase(phase int) ([]*domain.IssueRecord, error)
 	ListIssuesByChannel(channelIndex int) ([]*domain.IssueRecord, error)
 	ListIssuesByChannelAndPhase(channelIndex, phase int) ([]*domain.IssueRecord, error)

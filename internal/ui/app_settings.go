@@ -31,6 +31,9 @@ func (a *App) showSettingsDialog() {
 	claudePathEntry := widget.NewEntry()
 	claudePathEntry.SetText(a.config.Claude.CLIPath)
 
+	hookScriptEntry := widget.NewEntry()
+	hookScriptEntry.SetText(a.config.Claude.HookScriptPath)
+
 	// 모델 선택 드롭다운
 	modelSelect := widget.NewSelect(config.AvailableModels, nil)
 	if a.config.Claude.Model != "" {
@@ -64,6 +67,7 @@ func (a *App) showSettingsDialog() {
 		widget.NewFormItem("", widget.NewSeparator()),
 		widget.NewFormItem("", claudeEnabledCheck),
 		widget.NewFormItem("Claude CLI 경로", claudePathEntry),
+		widget.NewFormItem("Claude Hook 스크립트", hookScriptEntry),
 		widget.NewFormItem("Claude 모델", modelSelect),
 		widget.NewFormItem("", widget.NewSeparator()),
 		widget.NewFormItem("출력 디렉토리", outputDirEntry),
@@ -84,11 +88,13 @@ func (a *App) showSettingsDialog() {
 		a.config.Claude.Enabled = claudeEnabledCheck.Checked
 		a.config.Claude.CLIPath = claudePathEntry.Text
 		a.config.Claude.Model = modelSelect.Selected
+		a.config.Claude.HookScriptPath = hookScriptEntry.Text
 		a.config.Output.Dir = outputDirEntry.Text
 
 		// Claude Adapter 모델 업데이트
 		if a.claudeAdapter != nil {
 			a.claudeAdapter.SetModel(modelSelect.Selected)
+			a.claudeAdapter.SetHookScriptPath(hookScriptEntry.Text)
 		}
 		a.config.Claude.ChannelPaths[0] = projectPath1Entry.Text
 		a.config.Claude.ChannelPaths[1] = projectPath2Entry.Text

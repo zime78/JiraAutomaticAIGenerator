@@ -288,12 +288,14 @@ func (mv *MarkdownViewer) ShowSearch() {
 
 // hideSearch 검색 바 숨기기
 func (mv *MarkdownViewer) hideSearch() {
-	mv.searchBar.Hide()
-	mv.searchEntry.SetText("")
 	mv.searchResults = nil
 	mv.currentResult = 0
-	mv.updateSearchLabel()
-	mv.Refresh()
+	fyne.Do(func() {
+		mv.searchBar.Hide()
+		mv.searchEntry.SetText("")
+		mv.updateSearchLabel()
+		mv.Refresh()
+	})
 }
 
 // search 검색 수행
@@ -387,8 +389,10 @@ func (mv *MarkdownViewer) Reset() {
 	mv.currentResult = 0
 	mv.collapsedSections = make(map[int]bool)
 	mv.hideSearch()
-	mv.richText.Segments = nil
-	mv.richText.Refresh()
+	fyne.Do(func() {
+		mv.richText.Segments = nil
+		mv.richText.Refresh()
+	})
 }
 
 // MarkdownPreview 간단한 마크다운 미리보기 (canvas 기반)

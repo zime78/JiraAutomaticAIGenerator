@@ -26,9 +26,27 @@ func NewMarkdownGenerator(promptTemplate string) *MarkdownGenerator {
 	}
 }
 
+// normalizeMediaPathsToAbsolute는 마크다운에 출력할 미디어 경로를 절대경로로 정규화한다.
+func normalizeMediaPathsToAbsolute(paths []string) []string {
+	normalized := make([]string, 0, len(paths))
+	for _, mediaPath := range paths {
+		absPath, err := filepath.Abs(mediaPath)
+		if err != nil {
+			normalized = append(normalized, mediaPath)
+			continue
+		}
+		normalized = append(normalized, absPath)
+	}
+	return normalized
+}
+
 // Generate creates a document from a Jira issue
 func (g *MarkdownGenerator) Generate(issue *domain.JiraIssue, imagePaths, framePaths []string, outputDir string) (*domain.GeneratedDocument, error) {
 	var content strings.Builder
+
+	// 출력 마크다운 경로 일관성을 위해 이미지/프레임 경로를 모두 절대경로로 통일한다.
+	imagePaths = normalizeMediaPathsToAbsolute(imagePaths)
+	framePaths = normalizeMediaPathsToAbsolute(framePaths)
 
 	content.WriteString(fmt.Sprintf("# [%s] %s\n\n", issue.Key, issue.Summary))
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"jira-ai-generator/internal/domain"
 	"jira-ai-generator/internal/logger"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -52,7 +53,7 @@ func (r *SQLiteRepository) migrate() error {
 	migrations := []string{
 		`CREATE TABLE IF NOT EXISTS issues (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			issue_key TEXT UNIQUE NOT NULL,
+			issue_key TEXT NOT NULL,
 			summary TEXT,
 			description TEXT,
 			jira_url TEXT,
@@ -61,7 +62,8 @@ func (r *SQLiteRepository) migrate() error {
 			status TEXT DEFAULT 'active',
 			channel_index INTEGER,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(issue_key, channel_index)
 		)`,
 		`CREATE TABLE IF NOT EXISTS analysis_results (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,6 +90,7 @@ func (r *SQLiteRepository) migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_issues_key ON issues(issue_key)`,
 		`CREATE INDEX IF NOT EXISTS idx_issues_phase ON issues(phase)`,
 		`CREATE INDEX IF NOT EXISTS idx_issues_channel ON issues(channel_index)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_issues_key_channel ON issues(issue_key, channel_index)`,
 		`CREATE INDEX IF NOT EXISTS idx_analysis_issue_id ON analysis_results(issue_id)`,
 	}
 
@@ -97,6 +100,87 @@ func (r *SQLiteRepository) migrate() error {
 		}
 	}
 
+	if err := r.migrateIssueUniqueConstraint(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// migrateIssueUniqueConstraint는 legacy 단일 issue_key UNIQUE 제약을 복합 UNIQUE(issue_key, channel_index)로 교체한다.
+func (r *SQLiteRepository) migrateIssueUniqueConstraint() error {
+	var tableSQL string
+	err := r.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='issues'`).Scan(&tableSQL)
+	if err != nil {
+		return fmt.Errorf("failed to inspect issues table schema: %w", err)
+	}
+
+	normalized := strings.ToLower(tableSQL)
+	hasSingleUnique := strings.Contains(normalized, "unique(issue_key)") ||
+		strings.Contains(normalized, "issue_key text unique") ||
+		strings.Contains(normalized, "issue_key text not null unique")
+	hasCompositeUnique := strings.Contains(normalized, "unique(issue_key, channel_index)")
+	if !hasSingleUnique || hasCompositeUnique {
+		return nil
+	}
+
+	logger.Debug("migrateIssueUniqueConstraint: legacy schema detected, migrating issues table")
+
+	// PRAGMA는 트랜잭션 밖에서 실행해야 효과가 있다
+	r.db.Exec(`PRAGMA foreign_keys = OFF`)
+
+	tx, err := r.db.Begin()
+	if err != nil {
+		r.db.Exec(`PRAGMA foreign_keys = ON`)
+		return fmt.Errorf("failed to begin schema migration tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS issues_new (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			issue_key TEXT NOT NULL,
+			summary TEXT,
+			description TEXT,
+			jira_url TEXT,
+			md_path TEXT,
+			phase INTEGER DEFAULT 1,
+			status TEXT DEFAULT 'active',
+			channel_index INTEGER,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(issue_key, channel_index)
+		)`,
+		`INSERT INTO issues_new (id, issue_key, summary, description, jira_url, md_path, phase, status, channel_index, created_at, updated_at)
+		 SELECT id, issue_key, summary, description, jira_url, md_path, phase, status, channel_index, created_at, updated_at
+		 FROM (
+		     SELECT *, ROW_NUMBER() OVER (
+		         PARTITION BY issue_key, COALESCE(channel_index, -1)
+		         ORDER BY updated_at DESC
+		     ) as rn
+		     FROM issues
+		 ) WHERE rn = 1`,
+		`DROP TABLE issues`,
+		`ALTER TABLE issues_new RENAME TO issues`,
+		`CREATE INDEX IF NOT EXISTS idx_issues_key ON issues(issue_key)`,
+		`CREATE INDEX IF NOT EXISTS idx_issues_phase ON issues(phase)`,
+		`CREATE INDEX IF NOT EXISTS idx_issues_channel ON issues(channel_index)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_issues_key_channel ON issues(issue_key, channel_index)`,
+	}
+	for _, stmt := range statements {
+		if _, execErr := tx.Exec(stmt); execErr != nil {
+			return fmt.Errorf("failed to execute schema migration statement: %w", execErr)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		r.db.Exec(`PRAGMA foreign_keys = ON`)
+		return fmt.Errorf("failed to commit schema migration tx: %w", err)
+	}
+
+	r.db.Exec(`PRAGMA foreign_keys = ON`)
+
+	logger.Debug("migrateIssueUniqueConstraint: migration completed")
 	return nil
 }
 
@@ -137,11 +221,29 @@ func (r *SQLiteRepository) CreateIssue(issue *domain.IssueRecord) error {
 	return nil
 }
 
+// UpsertIssue creates or updates an issue record by (issue_key, channel_index).
+func (r *SQLiteRepository) UpsertIssue(issue *domain.IssueRecord) error {
+	if issue == nil {
+		return fmt.Errorf("issue is nil")
+	}
+
+	existing, err := r.GetIssueByKeyAndChannel(issue.IssueKey, issue.ChannelIndex)
+	if err == nil && existing != nil {
+		issue.ID = existing.ID
+		if issue.CreatedAt.IsZero() {
+			issue.CreatedAt = existing.CreatedAt
+		}
+		return r.UpdateIssue(issue)
+	}
+
+	return r.CreateIssue(issue)
+}
+
 // GetIssue retrieves an issue by key
 func (r *SQLiteRepository) GetIssue(issueKey string) (*domain.IssueRecord, error) {
 	logger.Debug("GetIssue: issueKey=%s", issueKey)
 	query := `SELECT id, issue_key, summary, description, jira_url, md_path, phase, status, channel_index, created_at, updated_at
-		FROM issues WHERE issue_key = ?`
+		FROM issues WHERE issue_key = ? ORDER BY updated_at DESC LIMIT 1`
 
 	var issue domain.IssueRecord
 	err := r.db.QueryRow(query, issueKey).Scan(
@@ -170,11 +272,40 @@ func (r *SQLiteRepository) GetIssue(issueKey string) (*domain.IssueRecord, error
 	return &issue, nil
 }
 
+// GetIssueByKeyAndChannel retrieves an issue by key and channel index.
+func (r *SQLiteRepository) GetIssueByKeyAndChannel(issueKey string, channelIndex int) (*domain.IssueRecord, error) {
+	logger.Debug("GetIssueByKeyAndChannel: issueKey=%s, channel=%d", issueKey, channelIndex)
+	query := `SELECT id, issue_key, summary, description, jira_url, md_path, phase, status, channel_index, created_at, updated_at
+		FROM issues WHERE issue_key = ? AND channel_index = ?`
+
+	var issue domain.IssueRecord
+	err := r.db.QueryRow(query, issueKey, channelIndex).Scan(
+		&issue.ID,
+		&issue.IssueKey,
+		&issue.Summary,
+		&issue.Description,
+		&issue.JiraURL,
+		&issue.MDPath,
+		&issue.Phase,
+		&issue.Status,
+		&issue.ChannelIndex,
+		&issue.CreatedAt,
+		&issue.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("issue not found: %s (channel=%d)", issueKey, channelIndex)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get issue by key and channel: %w", err)
+	}
+	return &issue, nil
+}
+
 // UpdateIssue updates an existing issue
 func (r *SQLiteRepository) UpdateIssue(issue *domain.IssueRecord) error {
 	logger.Debug("UpdateIssue: issueKey=%s, phase=%d, status=%s", issue.IssueKey, issue.Phase, issue.Status)
 	query := `UPDATE issues SET summary = ?, description = ?, jira_url = ?, md_path = ?, phase = ?, status = ?, channel_index = ?, updated_at = ?
-		WHERE issue_key = ?`
+		WHERE issue_key = ? AND channel_index = ?`
 
 	now := time.Now()
 	_, err := r.db.Exec(query,
@@ -187,6 +318,7 @@ func (r *SQLiteRepository) UpdateIssue(issue *domain.IssueRecord) error {
 		issue.ChannelIndex,
 		now,
 		issue.IssueKey,
+		issue.ChannelIndex,
 	)
 	if err != nil {
 		logger.Debug("UpdateIssue: failed: %v", err)
@@ -409,6 +541,44 @@ func (r *SQLiteRepository) DeleteIssue(issueKey string) error {
 	_, err := r.db.Exec(query, issueKey)
 	if err != nil {
 		return fmt.Errorf("failed to delete issue: %w", err)
+	}
+	return nil
+}
+
+// DeleteIssueByIDAndChannel은 지정 채널의 단일 이슈를 연관 데이터와 함께 삭제한다.
+func (r *SQLiteRepository) DeleteIssueByIDAndChannel(issueID int64, channelIndex int) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin delete transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// 분석 결과를 먼저 삭제해 참조 무결성을 보장한다.
+	if _, err := tx.Exec(`DELETE FROM analysis_results WHERE issue_id = ?`, issueID); err != nil {
+		return fmt.Errorf("failed to delete analysis results: %w", err)
+	}
+
+	// 첨부파일 메타데이터를 삭제한다.
+	if _, err := tx.Exec(`DELETE FROM attachments WHERE issue_id = ?`, issueID); err != nil {
+		return fmt.Errorf("failed to delete attachments: %w", err)
+	}
+
+	// 채널 조건을 포함해 대상 이슈 레코드만 삭제한다.
+	result, err := tx.Exec(`DELETE FROM issues WHERE id = ? AND channel_index = ?`, issueID, channelIndex)
+	if err != nil {
+		return fmt.Errorf("failed to delete issue: %w", err)
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to check deleted rows: %w", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("issue not found for delete: id=%d, channel=%d", issueID, channelIndex)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit delete transaction: %w", err)
 	}
 	return nil
 }

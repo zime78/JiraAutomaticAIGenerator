@@ -47,8 +47,32 @@ type App struct {
 	queues        [3]*AnalysisQueue
 	completedJobs []*AnalysisJob
 
+	// V2 실행 작업 추적
+	runningTasksMu sync.Mutex
+	runningTasks   [3]map[string]*RunningTask
+
+	// 채널별 이슈 목록 로딩 요청 추적 (최신 요청만 UI 반영)
+	issueListLoadMu  sync.Mutex
+	issueListLoadSeq [3]uint64
+
 	// UI version control
 	useV2UI bool // V2 UI 사용 여부 (기본값: true, V1은 deprecated)
+
+	// V2 상태 참조
+	v2State *AppV2State
+}
+
+// RunningTask는 V2에서 실행 중인 2차/3차 작업의 런타임 상태를 보관한다.
+type RunningTask struct {
+	TaskID          string
+	IssueID         int64
+	IssueKey        string
+	ChannelIndex    int
+	PhaseLabel      string
+	PID             int
+	ScriptPath      string
+	LogPath         string
+	CancelRequested bool
 }
 
 // NewApp creates a new application instance with dependency injection
@@ -66,14 +90,14 @@ func NewApp(cfg *config.Config) (*App, error) {
 	// Create adapters
 	jiraClient := adapter.NewJiraClient(cfg.Jira.URL, cfg.Jira.Email, cfg.Jira.APIKey)
 	docGenerator := adapter.NewMarkdownGenerator(cfg.AI.PromptTemplate)
-	claudeAdapter := adapter.NewClaudeCodeAdapter(cfg.Claude.CLIPath, cfg.Claude.Enabled, cfg.Claude.Model)
+	claudeAdapter := adapter.NewClaudeCodeAdapter(cfg.Claude.CLIPath, cfg.Claude.Enabled, cfg.Claude.Model, cfg.Claude.HookScriptPath)
 	videoProcessor := adapter.NewFFmpegVideoProcessor()
 	downloader := adapter.NewAttachmentDownloader(jiraClient, cfg.Output.Dir)
 
 	// Create use cases
 	processIssueUC := usecase.NewProcessIssueUseCase(jiraClient, downloader, videoProcessor, docGenerator, cfg.Output.Dir)
 
-	return &App{
+	appInstance := &App{
 		fyneApp:         fyneApp,
 		config:          cfg,
 		processIssueUC:  processIssueUC,
@@ -94,7 +118,12 @@ func NewApp(cfg *config.Config) (*App, error) {
 			{Name: "채널 2", Pending: []*AnalysisJob{}},
 			{Name: "채널 3", Pending: []*AnalysisJob{}},
 		},
-	}, nil
+	}
+	for i := 0; i < 3; i++ {
+		appInstance.runningTasks[i] = make(map[string]*RunningTask)
+	}
+
+	return appInstance, nil
 }
 
 // UseV2UI returns whether V2 UI is enabled

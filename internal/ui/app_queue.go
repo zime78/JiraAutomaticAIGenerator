@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -162,19 +163,37 @@ func (a *App) addToQueue(channelIndex int) {
 func (a *App) stopQueueCurrent(channelIndex int) {
 	queue := a.queues[channelIndex]
 	ch := a.channels[channelIndex]
+	stopped := 0
+
+	// V2 실행 중인 작업 취소
+	for _, task := range a.markCancelRunningTasks(channelIndex) {
+		killRunningTask(task)
+		a.markRunningTaskCancelledInDB(task)
+		stopped++
+	}
 
 	if queue.Current == nil {
+		if stopped > 0 {
+			ch.StatusLabel.SetText(fmt.Sprintf("채널 %d 중지 요청됨 (%d개 실행)", channelIndex+1, stopped))
+		}
 		return
 	}
 
 	// 현재 작업에 중단 요청 상태를 기록한다.
 	queue.Current.CancelRequested = true
 
-	// Kill the process
-	cmd := exec.Command("pkill", "-f", queue.Current.ScriptPath)
-	cmd.Run()
+	// PID 기반 종료를 우선하고, 실패 시에만 pkill -f fallback 사용
+	if queue.Current.PID > 0 {
+		exec.Command("kill", "-TERM", strconv.Itoa(queue.Current.PID)).Run()
+	} else if queue.Current.ScriptPath != "" {
+		cleaned := filepath.Clean(queue.Current.ScriptPath)
+		if filepath.IsAbs(cleaned) {
+			exec.Command("pkill", "-f", cleaned).Run()
+		}
+	}
 
-	ch.StatusLabel.SetText(fmt.Sprintf("%s의 %s 중지 요청됨", queue.Name, queue.Current.IssueKey))
+	stopped++
+	ch.StatusLabel.SetText(fmt.Sprintf("%s의 %s 중지 요청됨 (총 %d개)", queue.Name, queue.Current.IssueKey, stopped))
 	ch.QueueList.Refresh()
 }
 
@@ -395,6 +414,13 @@ func (a *App) onStopAllQueues() {
 	for i := 0; i < 3; i++ {
 		queue := a.queues[i]
 		ch := a.channels[i]
+
+		// V2 병렬 실행 작업 중지
+		for _, task := range a.markCancelRunningTasks(i) {
+			killRunningTask(task)
+			a.markRunningTaskCancelledInDB(task)
+			stoppedCount++
+		}
 
 		// Stop current job
 		if queue.Current != nil {
