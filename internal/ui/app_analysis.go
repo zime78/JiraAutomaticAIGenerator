@@ -15,13 +15,9 @@ var markdownImageLinkPattern = regexp.MustCompile(`!\[([^\]]*)\]\(([^)]+)\)`)
 
 // onCopyChannelAnalysis는 해당 채널의 분석 텍스트를 클립보드에 복사한다.
 func (a *App) onCopyChannelAnalysis(channelIndex int) {
-	ch := a.channels[channelIndex]
 	analysisContent := ""
 	if a.v2State != nil {
-		analysisContent = a.v2State.resultPanels[channelIndex].GetAnalysis()
-	}
-	if analysisContent == "" && ch.AnalysisText != nil {
-		analysisContent = ch.AnalysisText.Text
+		analysisContent = a.v2State.resultPanels[channelIndex].GetIssueInfo()
 	}
 	if analysisContent == "" {
 		return
@@ -49,13 +45,7 @@ func (a *App) onRefreshChannelAnalysis(channelIndex int) {
 	}
 
 	if a.v2State != nil {
-		a.v2State.resultPanels[channelIndex].SetAnalysis(string(content))
-	}
-	if ch.AnalysisText != nil {
-		ch.AnalysisText.SetText(string(content))
-	}
-	if ch.CopyAnalysisBtn != nil {
-		ch.CopyAnalysisBtn.Enable()
+		a.v2State.resultPanels[channelIndex].SetIssueInfo(string(content))
 	}
 	ch.StatusLabel.SetText(fmt.Sprintf("분석 결과 새로고침 완료: %s", path))
 }
@@ -73,27 +63,6 @@ func (a *App) loadJobResultToChannel(job *AnalysisJob) {
 		a.tabs.SelectIndex(channelIndex)
 	}
 
-	// 이슈 마크다운 로드
-	mdPath := job.MDPath
-	if mdPath == "" {
-		mdPath = strings.TrimSuffix(job.AnalysisPath, "_plan.md") + ".md"
-		if _, err := os.Stat(mdPath); os.IsNotExist(err) {
-			mdPath = strings.TrimSuffix(job.AnalysisPath, "_analysis.md") + ".md"
-		}
-	}
-	if mdContent, err := os.ReadFile(mdPath); err == nil {
-		if a.v2State != nil {
-			a.v2State.resultPanels[channelIndex].SetIssueInfo(string(mdContent))
-		}
-		if ch.ResultText != nil {
-			ch.ResultText.SetText(string(mdContent))
-		}
-		if ch.CopyResultBtn != nil {
-			ch.CopyResultBtn.Enable()
-		}
-		ch.CurrentMDPath = mdPath
-	}
-
 	// AI 분석 결과 로드 (plan 파일 우선)
 	analysisPath := job.AnalysisPath
 	if job.PlanPath != "" {
@@ -102,30 +71,30 @@ func (a *App) loadJobResultToChannel(job *AnalysisJob) {
 
 	content, err := os.ReadFile(analysisPath)
 	if err != nil {
-		if ch.AnalysisText != nil {
-			ch.AnalysisText.SetText(fmt.Sprintf("분석 진행 중...\n\n이슈: %s\nPID: %d\n\n아직 결과가 생성되지 않았습니다.", job.IssueKey, job.PID))
+		// 이슈 마크다운 로드 (fallback)
+		mdPath := job.MDPath
+		if mdPath == "" {
+			mdPath = strings.TrimSuffix(job.AnalysisPath, "_plan.md") + ".md"
+			if _, err := os.Stat(mdPath); os.IsNotExist(err) {
+				mdPath = strings.TrimSuffix(job.AnalysisPath, "_analysis.md") + ".md"
+			}
+		}
+		if mdContent, readErr := os.ReadFile(mdPath); readErr == nil {
+			if a.v2State != nil {
+				a.v2State.resultPanels[channelIndex].SetIssueInfo(string(mdContent))
+			}
+			ch.CurrentMDPath = mdPath
 		}
 		return
 	}
 
 	if a.v2State != nil {
-		a.v2State.resultPanels[channelIndex].SetAnalysis(string(content))
-	}
-	if ch.AnalysisText != nil {
-		ch.AnalysisText.SetText(string(content))
+		a.v2State.resultPanels[channelIndex].SetIssueInfo(string(content))
 	}
 	ch.CurrentAnalysisPath = analysisPath
 	ch.CurrentScriptPath = job.ScriptPath
 	if job.PlanPath != "" {
 		ch.CurrentPlanPath = job.PlanPath
-	}
-	if ch.CopyAnalysisBtn != nil {
-		ch.CopyAnalysisBtn.Enable()
-	}
-
-	// AI 분석 탭으로 전환
-	if ch.InnerTabs != nil {
-		ch.InnerTabs.SelectIndex(1)
 	}
 
 	a.statusLabel.SetText(fmt.Sprintf("결과 로드됨: %s → %s", job.IssueKey, ch.Name))

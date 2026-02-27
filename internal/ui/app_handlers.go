@@ -26,14 +26,12 @@ func (a *App) onChannelProcess(channelIndex int) {
 
 	ch.ProcessBtn.Disable()
 	ch.CopyResultBtn.Disable()
-	ch.CopyAnalysisBtn.Disable()
 	ch.ProgressBar.Show()
 	ch.ProgressBar.SetValue(0)
 	ch.StatusLabel.SetText("이슈 조회 중...")
 
 	// 이전 결과 초기화
 	ch.ResultText.SetText("")
-	ch.AnalysisText.SetText("")
 	ch.CurrentDoc = nil
 	ch.CurrentMDPath = ""
 	ch.CurrentAnalysisPath = ""
@@ -67,7 +65,6 @@ func (a *App) processIssue(issueKey string, channelIndex int) {
 	ch.CurrentMDPath = result.MDPath
 	ch.ResultText.SetText(result.Document.Content)
 	ch.CopyResultBtn.Enable()
-	ch.InnerTabs.SelectIndex(0) // 이슈 정보 탭으로 전환
 }
 
 // onCopyChannelResult는 해당 채널의 이슈 결과를 클립보드에 복사한다.

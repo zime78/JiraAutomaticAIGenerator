@@ -51,10 +51,6 @@ type App struct {
 	runningTasksMu sync.Mutex
 	runningTasks   [3]map[string]*RunningTask
 
-	// 채널별 이슈 목록 로딩 요청 추적 (최신 요청만 UI 반영)
-	issueListLoadMu  sync.Mutex
-	issueListLoadSeq [3]uint64
-
 	// UI version control
 	useV2UI bool // V2 UI 사용 여부 (기본값: true, V1은 deprecated)
 

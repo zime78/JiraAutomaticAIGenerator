@@ -63,96 +63,6 @@ func parseHistoryID(historyID string) (int, int64, error) {
 	return channelIndex, issueID, nil
 }
 
-// listIssuesByMinPhase는 채널의 이슈 중 지정 단계 이상인 항목만 반환한다.
-func (a *App) listIssuesByMinPhase(channelIndex, minPhase int) ([]*domain.IssueRecord, error) {
-	if a.issueStore == nil {
-		return nil, nil
-	}
-	issues, err := a.issueStore.ListIssuesByChannel(channelIndex)
-	if err != nil {
-		return nil, err
-	}
-	filtered := make([]*domain.IssueRecord, 0, len(issues))
-	for _, issue := range issues {
-		if issue.Phase >= minPhase {
-			filtered = append(filtered, issue)
-		}
-	}
-	return filtered, nil
-}
-
-// nextIssueListLoadToken은 채널별 목록 로딩 요청의 최신 토큰을 증가시킨다.
-func (a *App) nextIssueListLoadToken(channelIndex int) uint64 {
-	a.issueListLoadMu.Lock()
-	defer a.issueListLoadMu.Unlock()
-	if channelIndex < 0 || channelIndex >= 3 {
-		return 0
-	}
-	a.issueListLoadSeq[channelIndex]++
-	return a.issueListLoadSeq[channelIndex]
-}
-
-// isLatestIssueListLoadToken은 주어진 토큰이 현재 채널의 최신 요청인지 확인한다.
-func (a *App) isLatestIssueListLoadToken(channelIndex int, token uint64) bool {
-	a.issueListLoadMu.Lock()
-	defer a.issueListLoadMu.Unlock()
-	if channelIndex < 0 || channelIndex >= 3 {
-		return false
-	}
-	return a.issueListLoadSeq[channelIndex] == token
-}
-
-// refreshIssueListsForSingleChannel는 특정 채널의 목록을 비동기 로딩하고 최신 요청만 UI에 반영한다.
-func (a *App) refreshIssueListsForSingleChannel(channelIndex, phase int, v2 *AppV2State) {
-	if channelIndex < 0 || channelIndex >= 3 || v2 == nil {
-		return
-	}
-	selector := v2.analysisSelectors[channelIndex]
-	if selector == nil {
-		return
-	}
-
-	selector.SetPhase1ListLoading(true)
-
-	token := a.nextIssueListLoadToken(channelIndex)
-	go func(targetChannel int, loadToken uint64) {
-		phase1Issues, errPhase1 := a.listIssuesByMinPhase(targetChannel, 1)
-
-		fyne.Do(func() {
-			if !a.isLatestIssueListLoadToken(targetChannel, loadToken) {
-				return
-			}
-
-			targetSelector := v2.analysisSelectors[targetChannel]
-			if targetSelector == nil {
-				return
-			}
-
-			if errPhase1 != nil {
-				logger.Debug("refreshIssueListsForSingleChannel: phase1 load failed (channel=%d): %v", targetChannel, errPhase1)
-			} else {
-				targetSelector.SetPhase1Items(phase1Issues)
-			}
-			targetSelector.SetPhase1ListLoading(false)
-		})
-	}(channelIndex, token)
-}
-
-// refreshIssueListsForChannel은 특정 채널의 1차/2차 완료 목록을 갱신한다.
-func (a *App) refreshIssueListsForChannel(channelIndex, phase int, v2 *AppV2State) {
-	if a.issueStore == nil || v2 == nil {
-		return
-	}
-
-	if channelIndex >= 0 && channelIndex < 3 {
-		a.refreshIssueListsForSingleChannel(channelIndex, phase, v2)
-		return
-	}
-	for i := 0; i < 3; i++ {
-		a.refreshIssueListsForSingleChannel(i, phase, v2)
-	}
-}
-
 // loadHistoryRecordToChannelV2는 사이드바 이력 선택 시 DB 기준으로 결과를 복원한다.
 func (a *App) loadHistoryRecordToChannelV2(historyID string, v2 *AppV2State) {
 	if a.issueStore == nil || v2 == nil {
@@ -245,11 +155,10 @@ func (a *App) loadIssueRecordToChannelV2(issue *domain.IssueRecord, v2 *AppV2Sta
 	ch.CurrentPlanPath = planPath
 	ch.CurrentAnalysisPath = analysisPath
 
+	// 2차 분석 결과가 있으면 이슈 정보에 표시 (1차 결과 대체)
 	if analysisPath != "" {
 		if raw, err := os.ReadFile(analysisPath); err == nil {
-			analysis := string(raw)
-			v2.resultPanels[channelIndex].SetAnalysis(analysis)
-			ch.AnalysisText.SetText(analysis)
+			v2.resultPanels[channelIndex].SetIssueInfo(string(raw))
 		}
 	}
 
@@ -599,12 +508,6 @@ func (a *App) runPhaseBatchV2(channelIndex int, records []*domain.IssueRecord, p
 		v2.appState.UpdatePhase(channelIndex, state.PhaseCompleted)
 		v2.progressPanels[channelIndex].SetComplete()
 	})
-
-	v2.appState.EventBus.Publish(state.Event{
-		Type:    state.EventIssueListRefresh,
-		Channel: channelIndex,
-		Data:    map[string]interface{}{"phase": 1},
-	})
 }
 
 // runPhase2RecordV2는 단일 이슈의 2차 실행을 처리한다.
@@ -678,8 +581,7 @@ func (a *App) runPhase2RecordV2(channelIndex int, record *domain.IssueRecord, wo
 		analysisContent = string(raw)
 	}
 	fyne.Do(func() {
-		v2.resultPanels[channelIndex].SetAnalysis(analysisContent)
-		a.channels[channelIndex].AnalysisText.SetText(v2.resultPanels[channelIndex].GetAnalysis())
+		v2.resultPanels[channelIndex].SetIssueInfo(analysisContent)
 		a.channels[channelIndex].CurrentPlanPath = result.PlanPath
 		a.channels[channelIndex].CurrentAnalysisPath = result.PlanPath
 	})

@@ -236,26 +236,6 @@ func (a *App) createChannelTab(channelIndex int) fyne.CanvasObject {
 		container.NewHBox(ch.CopyResultBtn), nil, nil, nil, issueScroll,
 	)
 
-	// AI 분석 패널
-	ch.AnalysisText = widget.NewMultiLineEntry()
-	ch.AnalysisText.SetPlaceHolder(fmt.Sprintf("%s AI 분석 결과가 여기에 표시됩니다...", queue.Name))
-	ch.AnalysisText.Wrapping = fyne.TextWrapWord
-	ch.CopyAnalysisBtn = widget.NewButtonWithIcon("분석 복사", theme.ContentCopyIcon(), func() {
-		a.onCopyChannelAnalysis(channelIndex)
-	})
-	ch.CopyAnalysisBtn.Disable()
-	analysisScroll := container.NewScroll(ch.AnalysisText)
-	analysisPanel := container.NewBorder(
-		container.NewHBox(ch.CopyAnalysisBtn), nil, nil, nil, analysisScroll,
-	)
-
-	// 내부 서브탭
-	ch.InnerTabs = container.NewAppTabs(
-		container.NewTabItem("이슈 정보", issuePanel),
-		container.NewTabItem("AI 분석 결과", analysisPanel),
-	)
-	ch.InnerTabs.SetTabLocation(container.TabLocationTop)
-
 	// 최종 레이아웃
 	topSection := container.NewVBox(
 		widget.NewLabel("Jira URL:"),
@@ -268,7 +248,7 @@ func (a *App) createChannelTab(channelIndex int) fyne.CanvasObject {
 		ch.StatusLabel,
 	)
 
-	return container.NewBorder(topSection, nil, nil, nil, ch.InnerTabs)
+	return container.NewBorder(topSection, nil, nil, nil, issuePanel)
 }
 
 // createHistoryPanel은 모든 채널의 완료 이력을 공유하는 패널을 생성한다.

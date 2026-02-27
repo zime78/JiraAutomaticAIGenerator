@@ -60,8 +60,6 @@ func (a *App) handleIssueDeleteRequestV2(channelIndex int, payload map[string]in
 				v2.resultPanels[channel].Reset()
 			}
 
-			// 삭제 후 1차/2차 목록을 함께 새로고침한다.
-			a.refreshIssueListsForChannel(channel, 0, v2)
 		})
 	}(record, targetChannel)
 }

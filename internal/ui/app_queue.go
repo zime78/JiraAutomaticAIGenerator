@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 
@@ -30,13 +29,10 @@ type ChannelState struct {
 	ProgressBar      *widget.ProgressBar
 
 	// 채널별 결과 위젯
-	ResultText      *widget.Entry
-	AnalysisText    *widget.Entry
-	StatusLabel     *widget.Label
-	CopyResultBtn   *widget.Button
-	CopyAnalysisBtn *widget.Button
-	QueueList *widget.List
-	InnerTabs       *container.AppTabs
+	ResultText    *widget.Entry
+	StatusLabel   *widget.Label
+	CopyResultBtn *widget.Button
+	QueueList     *widget.List
 
 	// 채널별 상태
 	CurrentDoc          *domain.GeneratedDocument
@@ -309,8 +305,9 @@ func (a *App) waitForJobCompletion(channelIndex int, job *AnalysisJob) QueueJobO
 				ch.StatusLabel.SetText(fmt.Sprintf("❌ %s 실패 (결과 파일 읽기 오류)", job.IssueKey))
 				return QueueJobOutcomeFailed
 			}
-			ch.AnalysisText.SetText(string(content))
-			ch.CopyAnalysisBtn.Enable()
+			if a.v2State != nil {
+				a.v2State.resultPanels[channelIndex].SetIssueInfo(string(content))
+			}
 
 			if job.PlanPath != "" {
 				ch.CurrentPlanPath = job.PlanPath
