@@ -6,7 +6,6 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
-	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	"jira-ai-generator/internal/domain"
@@ -125,6 +124,9 @@ func (a *App) createMainContentV2(v2 *AppV2State) fyne.CanvasObject {
 		a.loadHistoryRecordToChannelV2(jobID, v2)
 	})
 
+	v2.sidebar.SetOnStopClick(func() {
+		a.stopQueueCurrent()
+	})
 	v2.sidebar.SetOnSettingsClick(func() {
 		a.showSettingsDialog()
 	})
@@ -177,14 +179,6 @@ func (a *App) createMainPanel(v2 *AppV2State) fyne.CanvasObject {
 		ch.ProjectPathEntry.SetText(a.config.Claude.ProjectPath)
 	}
 
-	// 중지 버튼
-	stopBtn := widget.NewButtonWithIcon("중지", theme.MediaStopIcon(), func() {
-		a.stopQueueCurrent()
-	})
-	stopBtn.Importance = widget.DangerImportance
-
-	buttonRow := container.NewHBox(stopBtn)
-
 	// 상태 라벨
 	ch.StatusLabel = widget.NewLabel(fmt.Sprintf("%s 대기 중...", queue.Name))
 
@@ -208,8 +202,6 @@ func (a *App) createMainPanel(v2 *AppV2State) fyne.CanvasObject {
 
 	// 간소화된 상단 섹션
 	topSection := container.NewVBox(
-		buttonRow,
-		widget.NewSeparator(),
 		progressPanel,
 		ch.StatusLabel,
 	)

@@ -5,6 +5,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	"jira-ai-generator/internal/logger"
@@ -31,10 +32,14 @@ type Sidebar struct {
 	// 설정 버튼
 	settingsBtn *widget.Button
 
+	// 중지 버튼
+	stopBtn *widget.Button
+
 	// 콜백
 	onQueueSelect   func(jobID string)
 	onHistorySelect func(jobID string)
 	onSettingsClick func()
+	onStopClick     func()
 }
 
 // NewSidebar 새 Sidebar 생성
@@ -53,6 +58,14 @@ func NewSidebar(eventBus *state.EventBus) *Sidebar {
 	// 분석 시작 버튼 생성
 	s.analyzeBtn = widget.NewButton("분석 시작", s.onAnalyzeClick)
 
+	// 중지 버튼 생성
+	s.stopBtn = widget.NewButtonWithIcon("중지", theme.MediaStopIcon(), func() {
+		if s.onStopClick != nil {
+			s.onStopClick()
+		}
+	})
+	s.stopBtn.Importance = widget.DangerImportance
+
 	s.settingsBtn.OnTapped = func() {
 		if s.onSettingsClick != nil {
 			s.onSettingsClick()
@@ -65,6 +78,7 @@ func NewSidebar(eventBus *state.EventBus) *Sidebar {
 		widget.NewLabelWithStyle("🔍 1차 분석", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		s.urlEntry,
 		s.analyzeBtn,
+		s.stopBtn,
 	)
 
 	queueSection := container.NewVBox(
@@ -130,6 +144,10 @@ func (s *Sidebar) SetOnHistorySelect(callback func(jobID string)) {
 }
 
 // SetOnSettingsClick 설정 버튼 콜백 설정
+func (s *Sidebar) SetOnStopClick(callback func()) {
+	s.onStopClick = callback
+}
+
 func (s *Sidebar) SetOnSettingsClick(callback func()) {
 	s.onSettingsClick = callback
 }
