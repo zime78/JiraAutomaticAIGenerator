@@ -140,6 +140,11 @@ func (a *App) loadIssueRecordToChannelV2(issue *domain.IssueRecord, v2 *AppV2Sta
 		}
 	}
 
+	// 진행률 패널을 완료 상태로 설정
+	if analysisPath != "" || issue.MDPath != "" {
+		v2.progressPanel.SetComplete()
+	}
+
 	a.statusLabel.SetText(fmt.Sprintf("이력 로드됨: %s", issue.IssueKey))
 }
 

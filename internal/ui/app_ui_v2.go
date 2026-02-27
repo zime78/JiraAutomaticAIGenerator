@@ -190,7 +190,7 @@ func (a *App) createMainPanel(v2 *AppV2State) fyne.CanvasObject {
 
 	// 결과 패널 콜백 설정
 	resultPanel.SetOnCopyIssue(func() {
-		a.onCopyChannelResult()
+		a.onCopyChannelAnalysis()
 	})
 
 	// 기존 위젯 참조 연결 (호환성)
