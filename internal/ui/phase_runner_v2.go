@@ -489,11 +489,16 @@ func (a *App) runPhase2RecordV2(record *domain.IssueRecord, workDir string, v2 *
 		return outcome
 	}
 
+	// 1차 분석 결과(plan.md)에서 AI 분석 섹션을 추출하여 2차 프롬프트에 포함
+	phase1PlanPath := strings.TrimSuffix(record.MDPath, ".md") + "_plan.md"
+	phase1Content := adapter.ExtractAISections(phase1PlanPath)
+	phase2Prompt := adapter.BuildPhase2PromptWithPlanContext(record.IssueKey, record.MDPath, phase1Content)
+
 	var result *adapter.PlanResult
 	var err error
 	hookRetryCount := 0
 	for {
-		result, err = a.claudeAdapter.AnalyzeAndGeneratePlan(record.MDPath, a.config.AI.PromptTemplate, workDir)
+		result, err = a.claudeAdapter.AnalyzeAndGeneratePlan(record.MDPath, phase2Prompt, workDir)
 		if err == nil {
 			task := &RunningTask{
 				TaskID:     fmt.Sprintf("phase2:%d", record.ID),

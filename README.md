@@ -1,6 +1,7 @@
 # Jira AI Generator
 
 Jira 티켓을 분석하여 AI가 처리할 수 있는 마크다운 문서를 자동 생성하는 macOS 앱입니다.
+**GUI**와 **CLI** 두 가지 방식으로 사용할 수 있습니다.
 
 ## 주요 기능
 
@@ -10,8 +11,8 @@ Jira 티켓을 분석하여 AI가 처리할 수 있는 마크다운 문서를 �
 - 📝 AI 처리용 마크다운 문서 생성
 - 📋 결과 클립보드 복사 기능
 - 🤖 **Claude Code 연동** - AI 자동 분석
-- 📊 **3채널 분석 큐** - 동시 3개 분석 지원
 - 📜 **완료 이력** - 이전 분석 결과 조회
+- 🖥️ **CLI 지원** - 터미널에서 단일/배치 처리
 
 ## 아키텍처
 
@@ -48,6 +49,7 @@ Jira 티켓을 분석하여 AI가 처리할 수 있는 마크다운 문서를 �
 | **UseCase** | `internal/usecase/` | 비즈니스 로직 (ProcessIssueUseCase) |
 | **Adapter** | `internal/adapter/` | 외부 시스템 구현체 (Jira API, Claude Code, ffmpeg 등) |
 | **UI** | `internal/ui/` | Fyne GUI (분리된 모듈 구조) |
+| **CLI** | `cmd/cli/` | CLI 엔트리포인트 (터미널 실행) |
 
 ## 설치 및 실행
 
@@ -112,35 +114,59 @@ Jira 티켓을 분석하여 AI가 처리할 수 있는 마크다운 문서를 �
 ### 실행
 
 ```bash
-# 개발 모드 실행
+# GUI - 개발 모드 실행
 ./scripts/run.sh
 
-# 또는 직접 실행
+# GUI - 직접 실행
 go run ./cmd/app
+
+# CLI - 단일 이슈 처리
+go run ./cmd/cli https://example.atlassian.net/browse/PROJ-123
+
+# CLI - 이슈 키로 처리
+go run ./cmd/cli PROJ-123
 ```
 
 ## 사용 방법
 
-### 기본 워크플로우
+### GUI 워크플로우
 
 1. 앱 실행
 2. **프로젝트 경로** 입력 (AI 분석에 사용될 소스코드 위치)
 3. Jira 이슈 URL 입력 (예: `https://domain.atlassian.net/browse/PROJ-123`)
-4. **"분석 시작"** 클릭 → 이슈 정보 조회
-5. AI 분석 탭에서 채널별 **"추가"** 클릭 → 분석 큐에 추가
-6. 분석 완료 후 **"분석 결과 복사"** 클릭
-7. AI 채팅에 붙여넣기
+4. **"분석 시작"** 클릭 → 이슈 조회 + AI 분석 실행
+5. 분석 완료 후 **"복사"** 클릭
+6. AI 채팅에 붙여넣기
 
-### 다중 채널 분석
+### CLI 사용법
 
-| 기능 | 설명 |
+```bash
+# 단일 이슈 처리 (전체 워크플로우: 이슈 조회 → 문서 생성 → AI 분석)
+jira-ai-cli https://example.atlassian.net/browse/PROJ-123
+jira-ai-cli PROJ-123
+
+# AI 분석 생략 (문서 생성까지만)
+jira-ai-cli --no-ai PROJ-123
+
+# 일괄 처리 (파일에 URL/키를 한 줄씩 작성)
+jira-ai-cli --batch urls.txt
+
+# 출력 디렉토리 / 프로젝트 경로 지정
+jira-ai-cli --output ./my-output --project /path/to/project PROJ-123
+
+# 설정 파일 지정
+jira-ai-cli --config /path/to/config.ini PROJ-123
+```
+
+| 옵션 | 설명 |
 |------|------|
-| **채널 1~3** | 동시에 최대 3개 분석 가능 |
-| **추가** | 현재 이슈를 해당 채널 큐에 추가 |
-| **중지** | 해당 채널의 현재 분석 중지 |
-| **전체 중지** | 모든 채널의 분석 중지 |
+| `--batch <file>` | URL 목록 파일로 일괄 처리 (한 줄에 하나) |
+| `--no-ai` | AI 분석 생략 (1차 문서 생성까지만) |
+| `--project <path>` | 프로젝트 경로 (config.ini 대신 지정) |
+| `--output <path>` | 출력 디렉토리 (config.ini 대신 지정) |
+| `--config <path>` | 설정 파일 경로 |
 
-### 완료 이력
+### 완료 이력 (GUI)
 
 - 앱 시작 시 `output/` 폴더의 기존 분석 결과 자동 로드
 - 완료된 분석 클릭 → 해당 결과 표시
@@ -149,13 +175,31 @@ go run ./cmd/app
 
 | 스크립트 | 용도 | 사용법 |
 | -------- | ---- | ------ |
-| `build.sh` | 기본 빌드 | `./scripts/build.sh` |
+| `build.sh` | GUI + CLI 빌드 (`dist/`) | `./scripts/build.sh` |
+| `build_cli.sh` | CLI 단독 빌드 (`dist/`) | `./scripts/build_cli.sh` |
 | `run.sh` | 디버깅/개발 모드 | `./scripts/run.sh` |
-| `release.sh` | 프로덕션 배포 빌드 | `./scripts/release.sh [버전]` |
+| `release.sh` | 프로덕션 배포 빌드 (`dist/`) | `./scripts/release.sh [버전]` |
 | `test_jira.sh` | Jira API 연결 테스트 | `./scripts/test_jira.sh ITSM-5239` |
-| `clean.sh` | 빌드 산출물 정리 | `./scripts/clean.sh` |
+| `clean.sh` | 빌드 산출물 정리 (`dist/` 삭제) | `./scripts/clean.sh` |
 | `check_deps.sh` | 시스템 의존성 확인 | `./scripts/check_deps.sh` |
 | `test.sh` | 테스트 실행 | `./scripts/test.sh [-v\|-cover\|-coverprofile]` |
+
+### 빌드 결과물 (`dist/`)
+
+```text
+dist/
+├── jira-ai-generator           # 개발용 GUI (build.sh)
+├── jira-ai-cli                 # 개발용 CLI (build.sh / build_cli.sh)
+│
+│  # release.sh 배포 빌드:
+├── JiraAIGenerator_apple       # GUI - Apple Silicon
+├── JiraAIGenerator_intel       # GUI - Intel Mac
+├── JiraAIGenerator_universal   # GUI - 유니버설
+├── JiraAICLI_apple             # CLI - Apple Silicon
+├── JiraAICLI_intel             # CLI - Intel Mac
+├── JiraAICLI_universal         # CLI - 유니버설
+└── JiraAICLI_linux             # CLI - Linux
+```
 
 ## 출력 구조
 
@@ -176,7 +220,9 @@ output/
 
 ```text
 JiraAutomaticAIGenerator/
-├── cmd/app/main.go              # 앱 진입점
+├── cmd/
+│   ├── app/main.go              # GUI 진입점 (Fyne)
+│   └── cli/main.go              # CLI 진입점 (터미널)
 ├── internal/
 │   ├── domain/                  # 도메인 엔티티
 │   ├── port/                    # 인터페이스 정의

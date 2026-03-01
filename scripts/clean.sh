@@ -7,6 +7,7 @@ echo "🧹 정리 중..."
 
 # 바이너리 삭제
 rm -f jira-ai-generator
+rm -f jira-ai-cli
 rm -rf dist/
 
 # 출력 디렉터리 정리 (선택)

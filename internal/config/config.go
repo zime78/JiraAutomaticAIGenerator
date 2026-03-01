@@ -82,23 +82,34 @@ func Load(path string) (*Config, error) {
 	return config, nil
 }
 
-// LoadDefault attempts to load config from default locations
+// LoadDefault attempts to load config from default locations (config.ini)
 func LoadDefault() (*Config, error) {
+	return loadDefaultByName("config.ini")
+}
+
+// LoadDefaultCLI attempts to load config from CLI default locations (config-cli.ini)
+func LoadDefaultCLI() (*Config, error) {
+	return loadDefaultByName("config-cli.ini")
+}
+
+// loadDefaultByName은 지정된 파일명으로 설정 파일을 탐색한다.
+// 탐색 순서: 현재 디렉토리 → ~/.jira-ai-generator/
+func loadDefaultByName(filename string) (*Config, error) {
 	// Try current directory first
-	if _, err := os.Stat("config.ini"); err == nil {
-		return Load("config.ini")
+	if _, err := os.Stat(filename); err == nil {
+		return Load(filename)
 	}
 
 	// Try user home directory
 	homeDir, err := os.UserHomeDir()
 	if err == nil {
-		configPath := filepath.Join(homeDir, ".jira-ai-generator", "config.ini")
+		configPath := filepath.Join(homeDir, ".jira-ai-generator", filename)
 		if _, err := os.Stat(configPath); err == nil {
 			return Load(configPath)
 		}
 	}
 
-	return nil, fmt.Errorf("config.ini not found")
+	return nil, fmt.Errorf("%s not found", filename)
 }
 
 // Validate checks if the configuration is valid
@@ -116,9 +127,7 @@ func (c *Config) Validate() error {
 		if c.Claude.ProjectPath == "" {
 			return fmt.Errorf("claude.project_path_1 is required when claude.enabled=true")
 		}
-		if c.Claude.HookScriptPath == "" {
-			return fmt.Errorf("claude.hook_script_path is required when claude.enabled=true")
-		}
+		// hook_script_path는 선택 사항 — 미설정 시 Hook 없이 Claude 실행
 	}
 	return nil
 }

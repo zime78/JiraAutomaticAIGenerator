@@ -1,5 +1,7 @@
 # Binaries
 jira-ai-generator
+app
+/cli
 *.exe
 dist/
 
@@ -8,6 +10,7 @@ output/
 
 # Config files (contain sensitive Jira credentials)
 config.ini
+config-cli.ini
 
 # Go build artifacts
 *.test
@@ -40,6 +43,9 @@ fyne-cross/
 
 # oh-my-claudecode (로컬 세션 상태)
 .omc/
+
+# bkit (로컬 에이전트 상태)
+.bkit/
 
 # PDCA 문서 (로컬 개발용)
 docs/

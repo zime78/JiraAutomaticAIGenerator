@@ -135,31 +135,35 @@ func validatePathForShell(path string) error {
 }
 
 // prepareHookSettingsFile은 프로젝트 전용 Hook 스크립트를 검증하고 임시 settings 파일을 생성한다.
-func (c *ClaudeCodeAdapter) prepareHookSettingsFile(settingsPath string) error {
+// 반환값: (hookEnabled, error) — hookScriptPath가 비어있거나 파일이 없으면 (false, nil)로 Hook 스킵.
+func (c *ClaudeCodeAdapter) prepareHookSettingsFile(settingsPath string) (bool, error) {
+	// hook_script_path 미설정 시 Hook 스킵 (선택 사항)
 	if strings.TrimSpace(c.hookScriptPath) == "" {
-		return &HookConfigurationError{Reason: "hook_script_path가 비어 있습니다. 설정에서 Hook 스크립트 경로를 입력해주세요"}
+		return false, nil
 	}
 
 	absHookPath, err := filepath.Abs(strings.TrimSpace(c.hookScriptPath))
 	if err != nil {
-		return &HookConfigurationError{Reason: fmt.Sprintf("Hook 스크립트 절대 경로 변환 실패: %v", err)}
+		return false, &HookConfigurationError{Reason: fmt.Sprintf("Hook 스크립트 절대 경로 변환 실패: %v", err)}
 	}
 
 	// 쉘 인젝션 방지를 위한 경로 문자 검증
 	if err := validatePathForShell(absHookPath); err != nil {
-		return &HookConfigurationError{Reason: fmt.Sprintf("Hook 스크립트 경로에 허용되지 않는 문자가 포함되어 있습니다: %v", err)}
+		return false, &HookConfigurationError{Reason: fmt.Sprintf("Hook 스크립트 경로에 허용되지 않는 문자가 포함되어 있습니다: %v", err)}
 	}
 
 	info, err := os.Stat(absHookPath)
 	if err != nil {
-		return &HookConfigurationError{Reason: fmt.Sprintf("Hook 스크립트 파일을 찾을 수 없습니다: %s", absHookPath)}
+		// 파일이 없으면 Hook 스킵 (경고 로그)
+		logger.Debug("Hook 스크립트 파일을 찾을 수 없어 Hook 없이 진행합니다: %s", absHookPath)
+		return false, nil
 	}
 	if info.IsDir() {
-		return &HookConfigurationError{Reason: fmt.Sprintf("Hook 스크립트 경로가 디렉터리입니다: %s", absHookPath)}
+		return false, &HookConfigurationError{Reason: fmt.Sprintf("Hook 스크립트 경로가 디렉터리입니다: %s", absHookPath)}
 	}
 	// 실행 권한 검증
 	if info.Mode().Perm()&0111 == 0 {
-		return &HookConfigurationError{Reason: fmt.Sprintf("Hook 스크립트에 실행 권한이 없습니다: %s (chmod +x 필요)", absHookPath)}
+		return false, &HookConfigurationError{Reason: fmt.Sprintf("Hook 스크립트에 실행 권한이 없습니다: %s (chmod +x 필요)", absHookPath)}
 	}
 
 	settings := hookSettingsFileSchema{
@@ -191,13 +195,13 @@ func (c *ClaudeCodeAdapter) prepareHookSettingsFile(settingsPath string) error {
 
 	raw, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal hook settings: %w", err)
+		return false, fmt.Errorf("failed to marshal hook settings: %w", err)
 	}
 
 	if err := os.WriteFile(settingsPath, raw, 0600); err != nil {
-		return fmt.Errorf("failed to write hook settings: %w", err)
+		return false, fmt.Errorf("failed to write hook settings: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 // AnalyzeIssue launches Claude as a detached background process
@@ -238,8 +242,15 @@ func (c *ClaudeCodeAdapter) AnalyzeIssue(mdFilePath, prompt, workDir string) (*A
 	if err := os.WriteFile(promptFile, []byte(fullPrompt), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write prompt file: %w", err)
 	}
-	if err := c.prepareHookSettingsFile(settingsPath); err != nil {
+	hookEnabled, err := c.prepareHookSettingsFile(settingsPath)
+	if err != nil {
 		return nil, err
+	}
+
+	// Hook 활성 여부에 따라 --settings 플래그 결정
+	settingsFlag := ""
+	if hookEnabled {
+		settingsFlag = fmt.Sprintf("--settings '%s'", settingsPath)
 	}
 
 	// Create a wrapper script for background execution
@@ -255,7 +266,7 @@ echo "Prompt file: %s"
 echo "Output file: %s"
 echo ""
 echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Running Claude..."
-%s --settings '%s' --model %s --print "$(cat '%s')" --output-format text > /tmp/claude_output_$$.txt 2>&1
+%s %s --model %s --print "$(cat '%s')" --output-format text > /tmp/claude_output_$$.txt 2>&1
 CLAUDE_EXIT=$?
 echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Claude exited with code: $CLAUDE_EXIT"
 echo "Output size: $(wc -c < /tmp/claude_output_$$.txt) bytes"
@@ -285,7 +296,7 @@ echo "✅ 분석 완료: $(date '+%%Y-%%m-%%d %%H:%%M:%%S')" >> "%s"
 
 rm -f /tmp/claude_output_$$.txt "%s" "%s" "%s"
 echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Done!"
-`, logFile, effectiveDir, effectiveDir, promptFile, outputPath, c.cliPath, settingsPath, c.model, promptFile, outputPath, outputPath, outputPath, effectiveDir, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, promptFile, scriptPath, settingsPath)
+`, logFile, effectiveDir, effectiveDir, promptFile, outputPath, c.cliPath, settingsFlag, c.model, promptFile, outputPath, outputPath, outputPath, effectiveDir, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, outputPath, promptFile, scriptPath, settingsPath)
 
 	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
 		return nil, fmt.Errorf("failed to write script: %w", err)
@@ -494,8 +505,15 @@ func (c *ClaudeCodeAdapter) AnalyzeAndGeneratePlan(mdFilePath, prompt, workDir s
 	if err := os.WriteFile(promptFile, []byte(fullPrompt), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write prompt file: %w", err)
 	}
-	if err := c.prepareHookSettingsFile(settingsPath); err != nil {
+	hookEnabled, err := c.prepareHookSettingsFile(settingsPath)
+	if err != nil {
 		return nil, err
+	}
+
+	// Hook 활성 여부에 따라 --settings 플래그 결정
+	settingsFlag := ""
+	if hookEnabled {
+		settingsFlag = fmt.Sprintf("--settings '%s'", settingsPath)
 	}
 
 	// 래퍼 스크립트 생성: Claude 실행 → 결과를 plan 파일로 조립
@@ -504,11 +522,13 @@ exec > "%s" 2>&1
 echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Phase 1: 분석 및 계획 생성 시작..."
 echo "Working directory: %s"
 cd "%s"
+# Hook 스크립트에서 1차 분석 결과를 참조할 수 있도록 환경변수 설정
+export JIRA_AI_PLAN_PATH="%s"
 echo "Prompt file: %s"
 echo "Plan file: %s"
 echo ""
 echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Running Claude (Phase 1 - 분석)..."
-%s --settings '%s' --model %s --print "$(cat '%s')" --output-format text > /tmp/claude_plan_$$.txt 2>&1
+%s %s --model %s --print "$(cat '%s')" --output-format text > /tmp/claude_plan_$$.txt 2>&1
 CLAUDE_EXIT=$?
 echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Claude exited with code: $CLAUDE_EXIT"
 echo "Output size: $(wc -c < /tmp/claude_plan_$$.txt) bytes"
@@ -575,8 +595,8 @@ echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Plan file created: %s"
 rm -f /tmp/claude_plan_$$.txt "%s" "%s"
 echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] Phase 1 완료!"
 `,
-		logFile, effectiveDir, effectiveDir, promptFile, planPath,
-		c.cliPath, settingsPath, c.model, promptFile,
+		logFile, effectiveDir, effectiveDir, planPath, promptFile, planPath,
+		c.cliPath, settingsFlag, c.model, promptFile,
 		planPath,
 		planPath, planPath, mdFilePath, planPath, planPath, planPath, planPath,
 		planPath, planPath, planPath, effectiveDir, planPath, planPath,
@@ -625,6 +645,118 @@ func (c *ClaudeCodeAdapter) SendPlanToClaudeAsync(mdFilePath, prompt, workDir st
 			onComplete(result, err)
 		}
 	}()
+}
+
+// ExtractAISections는 plan.md 파일에서 AI 분석 결과 섹션만 추출한다.
+// "## AI 분석 결과" 부터 "## 실행 지시사항" 직전까지의 내용을 반환한다.
+// 파일이 없거나 해당 섹션이 없으면 빈 문자열을 반환한다.
+func ExtractAISections(planPath string) string {
+	if planPath == "" {
+		return ""
+	}
+	raw, err := os.ReadFile(planPath)
+	if err != nil {
+		return ""
+	}
+	content := string(raw)
+
+	// "## AI 분석 결과" 섹션 시작점 탐색
+	startMarker := "## AI 분석 결과"
+	startIdx := strings.Index(content, startMarker)
+	if startIdx < 0 {
+		return ""
+	}
+
+	// "## 실행 지시사항" 전까지 추출 (없으면 끝까지)
+	section := content[startIdx:]
+	endMarker := "## 실행 지시사항"
+	endIdx := strings.Index(section, endMarker)
+	if endIdx > 0 {
+		section = section[:endIdx]
+	}
+
+	return strings.TrimSpace(section)
+}
+
+// BuildPhase2PromptWithPlanContext는 Phase 2(2차 분석)용 프롬프트를 생성한다.
+// 1차 분석 결과의 AI 분석 섹션을 포함하여, Claude가 코드 수정 시
+// 구체적인 가이드를 참조할 수 있게 한다.
+// phase1Content가 빈 문자열이면 기존 BuildAnalysisPlanPrompt로 fallback한다.
+func BuildPhase2PromptWithPlanContext(issueKey, mdPath, phase1Content string) string {
+	if strings.TrimSpace(phase1Content) == "" {
+		return BuildAnalysisPlanPrompt(issueKey, mdPath)
+	}
+
+	return fmt.Sprintf(`Jira 이슈 %s에 대한 2차 분석을 수행합니다.
+
+분석 대상 파일: %s
+
+## 1차 분석 결과 (참조용)
+
+아래는 이전 1차 분석에서 도출된 결과입니다. 이 정보를 바탕으로 코드를 수정하세요.
+
+%s
+
+## 절대 규칙
+- 모든 분석 결과를 이 응답에 **직접 전체 출력**하세요.
+- 별도의 플랜 파일이나 외부 파일을 절대 생성하지 마세요.
+- "파일에 작성했습니다", "계획을 만들었습니다" 같은 문구를 사용하지 마세요.
+- EnterPlanMode 도구를 사용하지 마세요.
+- TodoWrite 도구를 사용하지 마세요.
+
+## 수정 가이드
+
+위 1차 분석의 **ROOT_CAUSE**와 **FILES_TO_MODIFY**를 참조하여:
+
+1. 각 파일을 열고 1차 분석에서 지적한 문제를 확인하세요.
+2. 제시된 "수정 후" 코드를 기반으로 실제 코드를 수정하세요.
+3. 수정 시 기존 코드 스타일과 패턴을 유지하세요.
+4. 수정이 불가능한 항목은 이유를 설명하세요.
+
+## 추가 분석 절차
+
+1. 1차 분석에서 놓친 관련 파일이 없는지 추가 검색하세요.
+2. 수정 코드가 다른 곳에 부작용을 일으키지 않는지 확인하세요.
+3. 빌드가 성공하는지 확인하세요.
+4. 관련 테스트가 있다면 실행하세요.
+
+## 출력 형식 (반드시 이 구조를 정확히 따르세요)
+
+### ISSUE_SUMMARY
+(이슈 요약 1-2줄)
+
+### ROOT_CAUSE
+(1차 분석 결과를 보완/확인한 원인 분석, 파일 **절대 경로**와 라인 번호 명시)
+
+### FILES_TO_MODIFY
+(수정이 필요한 각 파일에 대해 아래 형식으로 작성)
+
+#### 파일: [절대 파일 경로]
+- 수정 이유: [왜 수정이 필요한지]
+- 1차 분석 대비 변경: [1차 분석과 다른 점이 있다면 명시]
+
+수정 전:
+`+"`"+`"`+"`"+`kotlin (또는 해당 언어)
+// 기존 코드
+`+"`"+`"`+"`"+`
+
+수정 후:
+`+"`"+`"`+"`"+`kotlin
+// 변경된 코드
+`+"`"+`"`+"`"+`
+
+### TEST_CHECKLIST
+- [ ] 체크 항목 1
+- [ ] 체크 항목 2
+
+### EXECUTION_CONTEXT
+(수정 실행 시 알아야 할 추가 컨텍스트)
+
+## 중요 규칙
+- **별도의 파일을 생성하지 마세요**. 모든 내용을 이 응답에 직접 출력하세요.
+- 복사해서 바로 적용할 수 있는 **구체적인 수정 코드**를 반드시 포함하세요.
+- 1차 분석과 다른 판단을 했다면 그 이유를 명시하세요.`,
+		issueKey, mdPath, phase1Content)
 }
 
 // ExtractAnalysisFromMD extracts the key content from generated markdown

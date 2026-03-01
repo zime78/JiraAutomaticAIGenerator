@@ -12,21 +12,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 go test ./internal/usecase/...   # 특정 패키지 테스트
 go test -run TestProcessIssue_Success ./internal/usecase/  # 단일 테스트
 
-./scripts/build.sh         # 빌드 (clean → tidy → build)
-./scripts/run.sh           # 개발 모드 실행 (FYNE_FONT 한글 설정 포함)
-./scripts/release.sh 1.0.0 # 배포 빌드 (macOS/Linux 크로스 컴파일)
-./scripts/clean.sh         # 빌드 산출물 정리
+./scripts/build.sh         # GUI + CLI 빌드 → dist/
+./scripts/build_cli.sh     # CLI 단독 빌드 → dist/
+./scripts/run.sh           # GUI 개발 모드 실행 (FYNE_FONT 한글 설정 포함)
+
+go run ./cmd/cli PROJ-123          # CLI 직접 실행
+go run ./cmd/cli --batch urls.txt  # CLI 배치 모드
+./scripts/release.sh 1.0.0 # 배포 빌드 → dist/ (apple/intel/universal/linux)
+./scripts/clean.sh         # 빌드 산출물 정리 (dist/ 삭제)
 ./scripts/check_deps.sh    # 시스템 의존성 확인 (Go, Xcode, ffmpeg)
 ```
 
 ## 아키텍처
 
-Go 1.21 + Fyne GUI 앱. Clean Architecture (의존성은 항상 안쪽으로):
+Go 1.21 + Fyne GUI + CLI 앱. Clean Architecture (의존성은 항상 안쪽으로):
 
 ```
-UI (internal/ui/) → UseCase (internal/usecase/) → Port (internal/port/) ← Adapter (internal/adapter/)
-                                                    ↑
-                                                  Domain (internal/domain/)
+UI  (internal/ui/)  ─┐
+CLI (cmd/cli/)       ─┤→ UseCase (internal/usecase/) → Port (internal/port/) ← Adapter (internal/adapter/)
+                      │                                  ↑
+                      │                                Domain (internal/domain/)
 ```
 
 ### 핵심 워크플로우

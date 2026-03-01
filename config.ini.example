@@ -14,7 +14,9 @@ prompt_template = 다음 Jira 이슈를 분석하고 수정 코드를 작성해�
 cli_path = claude
 # 프로젝트 경로 (AI가 분석할 프로젝트의 절대 경로, 필수)
 project_path_1 = /path/to/your/project
-# 프로젝트 전용 Claude Hook 스크립트 경로 (필수)
-hook_script_path = /Users/your-user/Git/JiraAutomaticAIGenerator/scripts/claude_hook.sh
+# 프로젝트 전용 Claude Hook 스크립트 경로 (선택, 없으면 Hook 없이 실행)
+# hook_script_path = /path/to/JiraAutomaticAIGenerator/scripts/claude_hook.sh
+# Claude 모델 (기본값: claude-sonnet-4-20250514)
+# model = claude-sonnet-4-20250514
 # 분석 요청 활성화
 enabled = true
